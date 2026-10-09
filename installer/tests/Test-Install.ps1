@@ -249,7 +249,8 @@ while (-not $pageOk -and (Get-Date) -lt $deadline) {
     catch { $pageError = $_.Exception.Message }
     if (-not $pageOk) { Start-Sleep -Seconds 3 }
 }
-Check $pageOk "the n8n web page loads (last answer: $pageError)"
+if ($pageOk) { Check $true 'the n8n web page loads' }
+else { Check $false "the n8n web page loads (last answer: $pageError)" }
 
 # The helper that the Start n8n shortcut uses to open the browser.
 if (Test-Path "$Dir\support\wait-n8n.ps1") {
@@ -309,6 +310,13 @@ if ($Method -eq 'global') {
     Check ($script:nativeExit -ne 0) 'n8n is no longer installed in npm'
 }
 if ($dataDir) { Check (Test-Path "$dataDir\config") 'the data was kept' }
+if ($Method -eq 'folder') {
+    # Installing again into this folder must be possible without a question, so nothing but the data may be left in it.
+    $left = @(Get-ChildItem -Path $Dir -Force -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+    Write-Host "  left in the folder: $($left -join ', ')"
+    $others = @($left | Where-Object { $_ -ne '.n8n' })
+    Check ($others.Count -eq 0) "nothing but the data is left in the folder$(if ($others.Count) { ' (also there: ' + ($others -join ', ') + ')' })"
+}
 
 Say '6. Install once more, then uninstall and delete the data'
 if ((Invoke-Setup 'install3' @()) -ne 0) { Stop-Here 'The third install did not finish.' }
@@ -316,6 +324,10 @@ $code = Invoke-Uninstall @('/DELETEDATA=1')
 Check ($code -eq 0) "the uninstaller finished (exit code $code)"
 Start-Sleep -Seconds 3
 if ($dataDir) { Check (-not (Test-Path $dataDir)) 'the data was deleted' }
+if ($Method -eq 'folder') {
+    $left = @(Get-ChildItem -Path $Dir -Force -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+    Check ($left.Count -eq 0) "nothing is left in the folder$(if ($left.Count) { ' (there is: ' + ($left -join ', ') + ')' })"
+}
 
 Say 'Result'
 if ($script:problems.Count -gt 0) {

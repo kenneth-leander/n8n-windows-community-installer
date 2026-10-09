@@ -74,7 +74,7 @@ end;
 // Can n8n live in the folder that is typed in the folder box?
 function CheckInstallFolder: Boolean;
 var
-  Dir, Method: String;
+  Dir, Method, Other: String;
 begin
   Result := True;
   Dir := CutBackslash(WizardDirValue);
@@ -96,8 +96,9 @@ begin
   begin
     // Something else lives here. n8n would add its own files next to them. (The data that an uninstall keeps does
     // not count: installing again into that folder picks it up.)
-    if not DirHasOnlyN8nFiles(Dir) then
-      Result := AskYesNo('This folder already has other files in it.' + #13#10#13#10 +
+    Other := FirstOtherFileIn(Dir);
+    if Other <> '' then
+      Result := AskYesNo('This folder already has other files in it, for example "' + Other + '".' + #13#10#13#10 +
         'n8n will add its own files (node, node_modules, package.json and a few more) next to them. ' +
         'An empty folder is better. Use this folder anyway?', False);
   end;

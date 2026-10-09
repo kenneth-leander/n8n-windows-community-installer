@@ -28,6 +28,9 @@ begin
   DeleteFile(Dir + '\package.json');
   DeleteFile(Dir + '\package-lock.json');
   DeleteFile(Dir + '\.npmrc');
+  // n8n keeps a cache next to its data. It is only a cache, so it goes in either case.
+  DelTree(Dir + '\.cache\n8n', True, True, True);
+  RemoveDir(Dir + '\.cache');
   if GDeleteData then
     DelTree(Dir + '\.n8n', True, True, True)
   else if DirExists(Dir + '\.n8n') then

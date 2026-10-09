@@ -303,15 +303,16 @@ end;
 // Folders
 // ---------------------------------------------------------------------------
 
-// True when the folder is empty or holds nothing but what an n8n install of this installer leaves behind: its own
-// files, and the data that an uninstall keeps (.n8n). A file of anything else makes it False.
-function DirHasOnlyN8nFiles(const Dir: String): Boolean;
+// The name of the first thing in the folder that does not come from an install of this installer, or '' when the
+// folder is empty or holds only things that come from one. Those are the installer's own files, what n8n makes next
+// to its data (.cache) and the data that an uninstall keeps (.n8n).
+function FirstOtherFileIn(const Dir: String): String;
 var
   Found: TFindRec;
   Name, OwnNames: String;
 begin
-  Result := True;
-  OwnNames := '|.n8n|node|node_modules|node_modules.old|bin|support|package.json|package-lock.json|.npmrc|' +
+  Result := '';
+  OwnNames := '|.n8n|.cache|node|node_modules|node_modules.old|bin|support|package.json|package-lock.json|.npmrc|' +
     'start-n8n.cmd|stop-n8n.cmd|n8n-env.cmd|readme.txt|n8n.ico|n8n-installer.ini|unins000.exe|unins000.dat|unins000.msg|';
   if FindFirst(Dir + '\*', Found) then
   begin
@@ -321,7 +322,7 @@ begin
         if (Name <> '.') and (Name <> '..') and (Pos('|' + Name + '|', OwnNames) = 0) and
            (Copy(Name, 1, 6) <> 'node-v') then   // Node.js unpacked by an install that was interrupted
         begin
-          Result := False;
+          Result := Found.Name;
           Break;
         end;
       until not FindNext(Found);

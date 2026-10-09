@@ -70,6 +70,7 @@ function Invoke-Logged([string]$exe, [string[]]$arguments, [string]$logPrefix, [
 #   -UninstallArgs    extra switches for the uninstaller, like /DELETEDATA=1
 #   -UninstallIn      pieces of text the uninstall log has to contain (-UninstallNotIn: must not contain)
 #   -PreCreate        files to put in the install folder first (paths inside it), like a folder that is not empty
+#   -AfterUninstall   a script block that runs when the uninstaller is done; it gets the install folder
 function Test-Case {
     param(
         [string]$Name,
@@ -81,6 +82,7 @@ function Test-Case {
         [string[]]$UninstallIn = @(),
         [string[]]$UninstallNotIn = @(),
         [string[]]$PreCreate = @(),
+        [scriptblock]$AfterUninstall = $null,
         [switch]$StopShortcut,
         [string]$DryRunSwitch = '/DRYRUN'
     )
@@ -122,6 +124,7 @@ function Test-Case {
     Check ($null -eq (Get-UninstallEntry $dir)) 'Apps & features no longer lists it'
     Check (-not (Test-Path "$dir\n8n-installer.ini")) 'the install record is gone'
     Check (-not (Test-Path $menu)) 'the Start menu entries are gone'
+    if ($AfterUninstall) { & $AfterUninstall $dir }
     if ($script:problems.Count -gt $problemsBefore -and $u.Log) {
         Write-Host '--- uninstall log ---'
         Write-Host $u.Log
@@ -132,12 +135,18 @@ function Test-Case {
 Test-Case -Name 'folder' -InstallArgs @('/METHOD=folder', '/PORT=5690') `
     -ExpectInLog @('Method: folder\s+Port: 5690', 'SHASUMS256\.txt', 'npm\.cmd" install n8n@2 ', 'would write .*\\\.npmrc', 'would write .*\\start-n8n\.cmd')
 
-# A folder that only holds the data an earlier uninstall kept is fine to install into; a folder with anything else in it
-# needs a yes from the person (a silent install answers no and stops).
-Test-Case -Name 'folder-with-kept-data' -InstallArgs @('/METHOD=folder') -PreCreate @('.n8n\config') `
-    -ExpectNotInLog @('already has other files')
+# A folder that only holds what an earlier install left (the data an uninstall keeps, and the cache n8n makes next to it)
+# is fine to install into; a folder with anything else in it needs a yes from the person (a silent install answers no
+# and stops). The uninstaller keeps the data and removes the cache.
+Test-Case -Name 'folder-with-kept-data' -InstallArgs @('/METHOD=folder') -PreCreate @('.n8n\config', '.cache\n8n\cache.json') `
+    -ExpectNotInLog @('already has other files') `
+    -AfterUninstall {
+        param($dir)
+        Check (Test-Path "$dir\.n8n\config") 'the data is kept'
+        Check (-not (Test-Path "$dir\.cache")) 'the cache of n8n is gone'
+    }
 Test-Case -Name 'folder-with-other-files' -InstallArgs @('/METHOD=folder') -PreCreate @('my notes.txt', '.n8n\config') -ExpectExit 1 `
-    -ExpectInLog @('already has other files')
+    -ExpectInLog @('already has other files in it, for example "my notes\.txt"')
 
 # --- the user-account way, with a Node.js that fits and one that does not ---
 Test-Case -Name 'global' -InstallArgs @('/METHOD=global', '/FAKENODE=22.11.0') `
