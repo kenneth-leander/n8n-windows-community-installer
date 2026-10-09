@@ -84,11 +84,12 @@ begin
   ClearLastLines;
   if GDryRun then
   begin
-    // Test mode: say what would run. /DRYRUN=fail makes every program "fail", to try the error paths.
+    // Test mode: say what would run. /DRYRUN=fail makes every program "fail", to try the error paths;
+    // /FAKETOOLSAID="text" is what the failing program then printed.
     LogLine('  (dry run) would run: ' + Exe + ' ' + Params);
     if Switch('DRYRUN', '') = 'fail' then
     begin
-      RememberLine('(dry run) pretend error output');
+      RememberLine(Switch('FAKETOOLSAID', '(dry run) pretend error output'));
       Result := 1;
     end
     else

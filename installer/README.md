@@ -152,12 +152,14 @@ tests\              Test-Install.ps1 (the end to end test), Test-DryRun.ps1 (eve
   a way that cannot be used are tried with `/FAKEDOCKERMSG="said: <what Docker said>"` (or a sentence of our own, or
   `installed` for a Docker Desktop that Windows has not told this program about), `/FAKENODEMSG="<what Node.js said>"`,
   `/FAKEWSLMSG="<what WSL said>"` and `/FAKENETSTAT="<what netstat said>"`.
-  `/DRYRUN=fail` makes every program the installer would start fail, `/SLOW=3` makes every step take 3 seconds, and
+  `/DRYRUN=fail` makes every program the installer would start fail (`/FAKETOOLSAID="text"` is what it then printed),
+  `/SLOW=3` makes every step take 3 seconds, and
   `/SHOWFILES` prints the start script and the notes it would write, with every setting filled in. For the WSL2 way
   they also pretend what Linux answers: `/FAKEWSLUSER=ken` (or `root`), `/FAKEWSLOS=ubuntu` (`fedora`, `alpine`, ...),
   `/FAKEWSLNODE=22.11.0` (`none`, `18.19.1`), `/FAKEWSLNVM` (Node.js sits in the nvm folder of the user),
-  `/FAKEWSLPREFIX=/home/ken/.npm-global`, `/FAKEWSLN8N=2.40.0` (an n8n is there already) and `/FAKEWSLSTUCK`
-  (adding Node.js changes nothing).
+  `/FAKEWSLPREFIX=/home/ken/.npm-global`, `/FAKEWSLN8N=2.40.0` (an n8n is there already), `/FAKEWSLSTUCK`
+  (adding Node.js changes nothing) and `/FAKEWSLNET=ok` (`none`, or what curl said), the answer to the question
+  "can Linux download the list of Node.js versions from nodejs.org?" that Setup asks after nvm has failed.
   These are only honoured together with `/DRYRUN`. The uninstaller takes `/DRYRUN` as well: it then says which
   programs it would start (like `docker rm`) and starts none.
 

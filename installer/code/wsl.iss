@@ -22,6 +22,9 @@
 //   /FAKEWSLNVM               Node.js sits in the user's own nvm folder
 //   /FAKEWSLPREFIX=/home/ken/.npm-global     npm puts global packages in that folder
 //   /FAKEWSLN8N=2.40.0        an n8n is already there         /FAKEWSLSTUCK  adding Node.js changes nothing
+//   /FAKEWSLNET=ok|none|<text>   what Linux answers when asked to download the Node.js version list from nodejs.org
+//                             (the check that runs after nvm failed): ok = it works, none = no curl and no wget,
+//                             anything else = what curl said
 // With /SHOWFILES the log shows the start and stop scripts and the readme that would be written.
 // ---------------------------------------------------------------------------
 
@@ -616,11 +619,106 @@ begin
   GWslPathHint := '/usr/bin';
 end;
 
+// nvm looks Node.js versions up in a list that it downloads from nodejs.org, and it tells curl to say nothing when that
+// download fails, so all it then says is  Version '22' not found  (exit code 3), as if there were no such version.
+// This asks the same question again with the messages switched on. It prints NETTOOL (curl, wget or none), NETCODE
+// (0 = the list can be downloaded) and NETSAID (what the tool said when it could not).
+function WslNodejsOrgScript: String;
+begin
+  Result := 'set -f; ' + WslScriptStart +
+    'if command -v curl >/dev/null 2>&1; then T=curl; R=$(curl -fsS -L --max-time 20 -o /dev/null https://nodejs.org/dist/index.tab 2>&1); C=$?; ' +
+    'elif command -v wget >/dev/null 2>&1; then T=wget; R=$(wget -nv -T 20 -t 1 -O /dev/null https://nodejs.org/dist/index.tab 2>&1); C=$?; ' +
+    'else T=none; R=; C=127; fi; ' +
+    'echo NETTOOL=$T; echo NETCODE=$C; echo NETSAID=$R';
+end;
+
+// Sentences about why nvm could not find the version, or '' when that cannot be told. Run after nvm has failed.
+function WslNvmWhy: String;
+var
+  Lines: TArrayOfString;
+  Code, I: Integer;
+  Params, Tool, Said, Fake, TryIt: String;
+begin
+  Result := '';
+  Params := WslSh(GWslDistro, False, 'sh', WslNodejsOrgScript);
+  SetArrayLength(Lines, 0);
+  if GDryRun then
+  begin
+    FileLog('(dry run) would ask: ' + WslExe + ' ' + Params);
+    Fake := Switch('FAKEWSLNET', 'ok');
+    if Fake = 'ok' then
+    begin
+      WslAddLine(Lines, 'NETTOOL=curl');
+      WslAddLine(Lines, 'NETCODE=0');
+    end
+    else if Fake = 'none' then
+    begin
+      WslAddLine(Lines, 'NETTOOL=none');
+      WslAddLine(Lines, 'NETCODE=127');
+    end
+    else
+    begin
+      WslAddLine(Lines, 'NETTOOL=curl');
+      WslAddLine(Lines, 'NETCODE=6');
+      WslAddLine(Lines, 'NETSAID=' + Fake);
+    end;
+  end
+  else
+  begin
+    FileLog('> ' + WslExe + ' ' + Params);
+    if not CaptureTool(WslExe, Params, Lines, Code) then
+      FileLog('  wsl.exe could not be started');
+    for I := 0 to GetArrayLength(Lines) - 1 do
+      FileLog('  ' + WslNoNul(Lines[I]));
+  end;
+
+  Tool := WslValue(Lines, 'NETTOOL', '');
+  Code := StrToIntDef(WslValue(Lines, 'NETCODE', ''), -1);
+  Said := EndOf(WslValue(Lines, 'NETSAID', ''), 300);
+  if (Tool = 'curl') and (Copy(Said, 1, 6) = 'curl: ') then Delete(Said, 1, 6);
+  if (Tool = 'wget') and (Copy(Said, 1, 6) = 'wget: ') then Delete(Said, 1, 6);
+  if Tool = 'wget' then
+    TryIt := 'wget --spider https://nodejs.org'
+  else
+    TryIt := 'curl -I https://nodejs.org';
+  TryIt := 'Open ' + GWslDistro + ' (type  wsl -d ' + GWslDistro + '  in a terminal) and try  ' + TryIt + '  there. ' +
+    'When that works, run this installer again.';
+
+  if Tool = 'none' then
+    Result := GWslDistro + ' has neither curl nor wget, and nvm needs one of them to download Node.js. ' +
+      'Install one inside ' + GWslDistro + ' (for example with  sudo apt install curl ), then run this installer again.'
+  else if (Tool <> '') and (Code = 0) then
+    Result := GWslDistro + ' can download from nodejs.org, so the problem is something else. The lines above are what nvm said. ' +
+      'To see more, open ' + GWslDistro + ' (type  wsl -d ' + GWslDistro + '  in a terminal), run  nvm install ' + PrivateNodeLine + '  there, and run this installer again.'
+  else if (Tool <> '') and (Code > 0) then
+  begin
+    Result := GWslDistro + ' could not download the list of Node.js versions from nodejs.org, which nvm (the Node.js version manager) ' +
+      'needs to find Node.js ' + PrivateNodeLine + '. ';
+    if Said <> '' then
+      Result := Result + Tool + ' said: ' + AsSentence(Said) + ' '
+    else
+      Result := Result + Tool + ' ended with code ' + IntToStr(Code) + ' and said nothing. ';
+    Result := Result + TryIt;
+  end;
+end;
+
+// The text for the case that the nvm program itself was not where the Node.js of the user says it is.
+function WslNvmMissingText: String;
+var
+  Where: String;
+begin
+  Where := WslUp(GWslNodePath, 5);
+  if Where <> GWslHome + '/.nvm' then
+    Where := Where + ' or in ' + GWslHome + '/.nvm';
+  Result := 'The Node.js of ' + GWslUser + ' is managed by nvm, but the program of nvm (nvm.sh) was not found in ' + Where + '. ' +
+    'Install Node.js ' + PrivateNodeLine + ' yourself (see nodejs.org), then run this installer again.';
+end;
+
 procedure WslAddNodeWithNvm;
 var
   Code: Integer;
   Lines: TArrayOfString;
-  Params, Bin: String;
+  Params, Bin, Head: String;
 begin
   Working(True);
   GQuiet := True;
@@ -629,8 +727,13 @@ begin
   GQuiet := False;
   Working(False);
   if Code <> 0 then
-    Fail('nvm could not install Node.js ' + PrivateNodeLine + ' for ' + GWslUser + ' inside ' + GWslDistro + ' (exit code ' + IntToStr(Code) + ').' + #13#10#13#10 +
-      WslLastLines);
+  begin
+    Head := 'nvm could not install Node.js ' + PrivateNodeLine + ' for ' + GWslUser + ' inside ' + GWslDistro + ' (exit code ' + IntToStr(Code) + ').' + #13#10#13#10;
+    if Pos('NVM_SCRIPT_NOT_FOUND', WslLastLines) > 0 then
+      Fail(Head + WslNvmMissingText)
+    else
+      Fail(Head + WslLastLines + #13#10 + WslNvmWhy);
+  end;
 
   // nvm only changes the PATH of interactive shells, so ask it where the new version went.
   Params := WslSh(GWslDistro, False, 'bash',
@@ -847,7 +950,7 @@ end;
 function WslReadyNote(const Space, NewLine: String): String;
 begin
   Result := 'Inside ' + Cfg.WslDistro + ' this installer will:' + NewLine +
-    Space + '- add Node.js ' + PrivateNodeLine + ' if there is no Node.js that n8n 2.x runs on (system-wide, with root rights, using the internet)' + NewLine +
+    Space + '- add Node.js ' + PrivateNodeLine + ' if there is no Node.js that n8n 2.x runs on (with nvm when your Node.js comes from nvm, otherwise system-wide with root rights; this uses the internet)' + NewLine +
     Space + '- install the newest n8n 2.x. An n8n that is already there is replaced; your workflows and settings are kept' + NewLine;
   if WslDistroIsV1(Cfg.WslDistro) then
     Result := Result + Space + '- Note: ' + Cfg.WslDistro + ' runs on WSL 1, which is slow and often fails with n8n' + NewLine;

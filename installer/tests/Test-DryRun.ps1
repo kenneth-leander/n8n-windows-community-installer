@@ -287,6 +287,26 @@ Test-Case -Name 'wsl-exe-missing' -InstallArgs @('/METHOD=wsl', '/FAKEWSLEXE=mis
     -ExpectInLog @('WSL is not installed on this computer\.', 'wsl --install -d Ubuntu', 'wsl\.exe is not on this computer')
 Test-Case -Name 'wsl-failing-program' -InstallArgs @('/METHOD=wsl', $fakeWsl, '/WSLDISTRO=Ubuntu') -DryRunSwitch '/DRYRUN=fail' -ExpectExit 3 `
     -ExpectInLog @('FAILED: npm could not install n8n inside Ubuntu')
+# When nvm cannot download the list of Node.js versions from nodejs.org it only says "Version '22' not found" (and ends with
+# code 3), as if there were no such version. Setup then asks Linux the same question with the messages switched on
+# (/FAKEWSLNET= is Linux's answer) and says what came back. /FAKETOOLSAID= is what the failing nvm printed.
+Test-Case -Name 'wsl-nvm-no-internet' -InstallArgs @('/METHOD=wsl', $fakeWsl, '/WSLDISTRO=Ubuntu', '/FAKEWSLNVM', '/FAKEWSLNODE=24.11.0', '/FAKEWSLNET="curl: (6) Could not resolve host: nodejs.org"', '/FAKETOOLSAID="Version ''22'' not found - try `nvm ls-remote` to browse available versions."') -DryRunSwitch '/DRYRUN=fail' -ExpectExit 3 `
+    -ExpectInLog @('FAILED: nvm could not install Node\.js 22 for ken inside Ubuntu \(exit code 1\)',
+        'Version ''22'' not found - try',
+        'Ubuntu could not download the list of Node\.js versions from nodejs\.org, which nvm',
+        'curl said: \(6\) Could not resolve host: nodejs\.org\.',
+        'try  curl -I https://nodejs\.org  there',
+        'wsl\.exe -d Ubuntu --exec sh -c "[^"]*curl -fsS -L --max-time 20 -o /dev/null https://nodejs\.org/dist/index\.tab') `
+    -ExpectNotInLog @('can download from nodejs\.org')
+Test-Case -Name 'wsl-nvm-no-curl' -InstallArgs @('/METHOD=wsl', $fakeWsl, '/WSLDISTRO=Ubuntu', '/FAKEWSLNVM', '/FAKEWSLNODE=24.11.0', '/FAKEWSLNET=none') -DryRunSwitch '/DRYRUN=fail' -ExpectExit 3 `
+    -ExpectInLog @('Ubuntu has neither curl nor wget, and nvm needs one of them', 'sudo apt install curl')
+Test-Case -Name 'wsl-nvm-fails-with-internet' -InstallArgs @('/METHOD=wsl', $fakeWsl, '/WSLDISTRO=Ubuntu', '/FAKEWSLNVM', '/FAKEWSLNODE=24.11.0') -DryRunSwitch '/DRYRUN=fail' -ExpectExit 3 `
+    -ExpectInLog @('Ubuntu can download from nodejs\.org, so the problem is something else', 'run  nvm install 22  there') `
+    -ExpectNotInLog @('could not download the list of Node')
+Test-Case -Name 'wsl-nvm-script-missing' -InstallArgs @('/METHOD=wsl', $fakeWsl, '/WSLDISTRO=Ubuntu', '/FAKEWSLNVM', '/FAKEWSLNODE=24.11.0', '/FAKETOOLSAID=NVM_SCRIPT_NOT_FOUND') -DryRunSwitch '/DRYRUN=fail' -ExpectExit 3 `
+    -ExpectInLog @('FAILED: nvm could not install Node\.js 22 for ken inside Ubuntu',
+        'is managed by nvm, but the program of nvm \(nvm\.sh\) was not found in /home/ken/\.nvm\. Install Node\.js 22 yourself') `
+    -ExpectNotInLog @('index\.tab', 'NVM_SCRIPT_NOT_FOUND\s*$')
 
 Write-Host ''
 Remove-Item -Path $work -Recurse -Force -ErrorAction SilentlyContinue
