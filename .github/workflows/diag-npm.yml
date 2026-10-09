@@ -1,0 +1,101 @@
+name: Diagnose npm on Windows (temporary)
+
+# Temporary. Finds out why "npm install n8n@2" does not finish on GitHub's Windows computers when the
+# installer starts it. This file is deleted again as soon as the cause is known.
+
+on:
+  push:
+    branches: [gui-installer]
+    paths:
+      - '.github/workflows/diag-npm.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  npm:
+    name: npm install n8n@2 (${{ matrix.mode }})
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [plain, stdin-open, foreground]
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install n8n with npm and say what is going on every minute
+        shell: pwsh
+        env:
+          MODE: ${{ matrix.mode }}
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'npm-diag'
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          Set-Location $dir
+          Write-Host "node $(node --version), npm $(npm --version), mode $env:MODE"
+          Write-Host "registry $(npm config get registry), cache $(npm config get cache)"
+          $out = Join-Path $dir 'npm-out.txt'
+          $npmArgs = 'install n8n@2 --no-fund --no-audit --loglevel=http'
+          if ($env:MODE -eq 'foreground') { $npmArgs += ' --foreground-scripts' }
+
+          function Show-Activity([int]$rootId, [double]$elapsedSec) {
+            $all = @(Get-CimInstance Win32_Process)
+            $family = New-Object 'System.Collections.Generic.HashSet[int]'
+            [void]$family.Add($rootId)
+            do {
+              $grew = $false
+              foreach ($proc in $all) {
+                if ($family.Contains([int]$proc.ParentProcessId) -and $family.Add([int]$proc.ProcessId)) { $grew = $true }
+              }
+            } while ($grew)
+            Write-Host ("[{0:n1} min] programs started by npm:" -f ($elapsedSec / 60))
+            foreach ($proc in $all) {
+              if ($proc.ProcessId -eq $rootId -or -not $family.Contains([int]$proc.ProcessId)) { continue }
+              $cpu = ''
+              try { $cpu = '{0:n1}s' -f (Get-Process -Id $proc.ProcessId -ErrorAction Stop).CPU } catch { }
+              $line = "$($proc.CommandLine)"
+              if ($line.Length -gt 170) { $line = $line.Substring(0, 170) + '...' }
+              Write-Host ('  {0,6} (from {1,6})  cpu {2,8}  {3}' -f $proc.ProcessId, $proc.ParentProcessId, $cpu, $line)
+            }
+            if (Test-Path $out) {
+              $size = (Get-Item $out).Length
+              Write-Host "  npm output so far: $size bytes. Last lines:"
+              Get-Content -Path $out -Tail 3 -ErrorAction SilentlyContinue | ForEach-Object {
+                $text = "$_"; if ($text.Length -gt 170) { $text = $text.Substring(0, 170) + '...' }; Write-Host "    $text"
+              }
+            }
+          }
+
+          $clock = [Diagnostics.Stopwatch]::StartNew()
+          $cmdLine = "/c npm $npmArgs > `"$out`" 2>&1"
+          if ($env:MODE -eq 'stdin-open') {
+            # Standard input is a pipe that nobody ever writes to or closes.
+            $psi = New-Object Diagnostics.ProcessStartInfo
+            $psi.FileName = $env:ComSpec
+            $psi.Arguments = $cmdLine
+            $psi.UseShellExecute = $false
+            $psi.RedirectStandardInput = $true
+            $psi.CreateNoWindow = $true
+            $p = [Diagnostics.Process]::Start($psi)
+          }
+          else {
+            $p = Start-Process -FilePath $env:ComSpec -ArgumentList $cmdLine -PassThru -WindowStyle Hidden
+          }
+          $next = 60
+          $limit = 20 * 60
+          while (-not $p.WaitForExit(5000)) {
+            if ($clock.Elapsed.TotalSeconds -ge $next) { Show-Activity $p.Id $clock.Elapsed.TotalSeconds; $next += 60 }
+            if ($clock.Elapsed.TotalSeconds -ge $limit) {
+              Write-Host "::error::npm did not finish within 20 minutes"
+              Show-Activity $p.Id $clock.Elapsed.TotalSeconds
+              & taskkill.exe /PID $p.Id /T /F | Out-Null
+              break
+            }
+          }
+          Write-Host ("npm ended after {0:n0} seconds, exit code {1}" -f $clock.Elapsed.TotalSeconds, $p.ExitCode)
+          Write-Host '--- the last 40 lines npm printed ---'
+          Get-Content -Path $out -Tail 40 -ErrorAction SilentlyContinue
+          if ($p.ExitCode -ne 0) { exit 1 }
