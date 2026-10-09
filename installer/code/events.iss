@@ -189,13 +189,15 @@ end;
 
 procedure WriteInstallRecord;
 begin
-  if GDryRun then Exit;
+  // A dry run never rewrites the record of a real install. A fresh folder gets one, so the uninstaller can be tried too.
+  if GDryRun and GReplacing then Exit;
+  ForceDirectories(AppDir);
   SaveState('method', Cfg.Method);
   SaveState('installer_version', '{#AppVersion}');
   SaveState('port', IntToStr(Cfg.Port));
   SaveState('lan', B2S(Cfg.Lan));
   SaveState('n8n_version', GN8nVersion);
-  SaveState('path_added', B2S(Cfg.AddToPath));
+  SaveState('path_added', B2S(Cfg.AddToPath and not GDryRun));
   if Cfg.Method = MethodDocker then
   begin
     SaveState('docker_name', Cfg.DockerName);
@@ -273,6 +275,13 @@ end;
 
 function InitializeSetup: Boolean;
 begin
+  Result := True;
+end;
+
+// The uninstaller understands the test mode too: with /DRYRUN it says which programs it would start and starts none.
+function InitializeUninstall: Boolean;
+begin
+  GDryRun := SwitchGiven('DRYRUN');
   Result := True;
 end;
 

@@ -106,6 +106,10 @@ Name: "{autoprograms}\{code:GetGroupName}\Read me"; Filename: "{app}\README.txt"
 Name: "{autoprograms}\{code:GetGroupName}\Uninstall n8n"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\Start n8n"; Filename: "{app}\start-n8n.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\n8n.ico"; Comment: "Starts n8n and opens it in your web browser"; Check: WantDesktop
 
+[UninstallDelete]
+; The note this install keeps about itself is written by the install code, so Setup does not know about it.
+Type: files; Name: "{app}\n8n-installer.ini"
+
 [Run]
 Filename: "{app}\start-n8n.cmd"; Description: "Start n8n and open it in my web browser"; WorkingDir: "{app}"; Flags: postinstall nowait skipifsilent shellexec
 
