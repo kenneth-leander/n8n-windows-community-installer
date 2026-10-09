@@ -22,6 +22,52 @@ function Tidy([string]$Text, [int]$Max = 400) {
     return $t
 }
 
+# Runs a program, waits for it for at most $Seconds seconds and says what happened:
+#   Problem   why Windows could not start it ('' when it started)
+#   TimedOut  it did not finish in time and was stopped
+#   Code      its exit code
+#   Out, Err  what it printed, and what it wrote to its error output, as bytes
+# This is not Start-Process, on purpose: in Windows PowerShell 5.1 the exit code of a program that Start-Process started
+# comes back empty, and a check that reads "exit code is not 0" then takes every Docker for a stopped one.
+function Invoke-Program([string]$Path, [string]$Arguments, [int]$Seconds) {
+    $ErrorActionPreference = 'Stop'
+    $result = [pscustomobject]@{ Problem = ''; TimedOut = $false; Code = -1; Out = (New-Object byte[] 0); Err = (New-Object byte[] 0) }
+    $p = $null
+    try {
+        $info = New-Object System.Diagnostics.ProcessStartInfo
+        $info.FileName = $Path
+        $info.Arguments = $Arguments
+        $info.UseShellExecute = $false
+        $info.CreateNoWindow = $true
+        $info.RedirectStandardInput = $true
+        $info.RedirectStandardOutput = $true
+        $info.RedirectStandardError = $true
+        $p = [System.Diagnostics.Process]::Start($info)
+        $out = New-Object System.IO.MemoryStream
+        $err = New-Object System.IO.MemoryStream
+        $outTask = $p.StandardOutput.BaseStream.CopyToAsync($out)
+        $errTask = $p.StandardError.BaseStream.CopyToAsync($err)
+        $p.StandardInput.Close()      # nothing to read: a program that waits for a key press ends instead
+        if (-not $p.WaitForExit($Seconds * 1000)) {
+            try { $p.Kill() } catch { }
+            $result.TimedOut = $true
+            return $result
+        }
+        # It has ended. What it printed may still be on its way, so give it a moment.
+        [void][System.Threading.Tasks.Task]::WaitAll([System.Threading.Tasks.Task[]]@($outTask, $errTask), 3000)
+        $result.Code = $p.ExitCode
+        $result.Out = $out.ToArray()
+        $result.Err = $err.ToArray()
+    }
+    catch {
+        $result.Problem = $_.Exception.Message
+    }
+    finally {
+        if ($p) { $p.Dispose() }
+    }
+    return $result
+}
+
 $docker = $DockerPath
 if (-not $docker) {
     $found = Get-Command docker.exe -ErrorAction SilentlyContinue
@@ -36,44 +82,27 @@ if (-not $docker) {
     exit 0
 }
 
-$out = [IO.Path]::GetTempFileName()
-$err = [IO.Path]::GetTempFileName()
-$answer = ''
-try {
-    $p = $null
-    $startError = ''
-    try {
-        $p = Start-Process -FilePath $docker -NoNewWindow -PassThru -ErrorAction Stop `
-            -ArgumentList @('version', '--format', '{{.Server.Version}}|{{.Server.Os}}') `
-            -RedirectStandardOutput $out -RedirectStandardError $err
-    } catch {
-        $startError = $_.Exception.Message
+$run = Invoke-Program $docker 'version --format {{.Server.Version}}|{{.Server.Os}}' $TimeoutSec
+if ($run.Problem) {
+    $answer = 'stopped|Windows could not start docker.exe: ' + (Tidy $run.Problem 250)
+} elseif ($run.TimedOut) {
+    $answer = "stopped|Docker did not answer within $TimeoutSec seconds."
+} else {
+    $line = ''
+    foreach ($l in ([Text.Encoding]::UTF8.GetString($run.Out) -split "`r?`n")) {
+        if ($l.Trim()) { $line = $l.Trim(); break }
     }
-    if (-not $p) {
-        $answer = 'stopped|Windows could not start docker.exe: ' + (Tidy $startError 250)
-    } elseif (-not $p.WaitForExit($TimeoutSec * 1000)) {
-        try { $p.Kill() } catch { }
-        $answer = "stopped|Docker did not answer within $TimeoutSec seconds."
+    $said = [Text.Encoding]::UTF8.GetString($run.Err).Trim()
+    if ($run.Code -eq 0 -and $line -match '^[^|]+\|[a-z]+$') {
+        $parts = $line.Split('|')
+        if ($parts[1] -eq 'linux') { $answer = "ready|$($parts[0])" } else { $answer = "windows|$($parts[0])" }
+    } elseif ($said) {
+        $answer = 'stopped|said: ' + (Tidy $said)
+    } elseif ($line) {
+        $answer = 'stopped|Docker answered something unexpected: ' + (Tidy $line 200)
     } else {
-        $p.WaitForExit()
-        $line = ''
-        if (Test-Path $out) { $line = ((Get-Content -Path $out -TotalCount 1) | Out-String).Trim() }
-        $said = ''
-        if (Test-Path $err) { $said = ((Get-Content -Path $err) | Out-String).Trim() }
-        if ($p.ExitCode -eq 0 -and $line -match '^[^|]+\|[a-z]+$') {
-            $parts = $line.Split('|')
-            if ($parts[1] -eq 'linux') { $answer = "ready|$($parts[0])" } else { $answer = "windows|$($parts[0])" }
-        } elseif ($said) {
-            $answer = 'stopped|said: ' + (Tidy $said)
-        } elseif ($line) {
-            $answer = 'stopped|Docker answered something unexpected: ' + (Tidy $line 200)
-        } else {
-            $answer = "stopped|docker.exe ended with code $($p.ExitCode) and gave no message."
-        }
+        $answer = "stopped|docker.exe ended with code $($run.Code) and gave no message."
     }
-}
-finally {
-    Remove-Item -Path $out, $err -Force -ErrorAction SilentlyContinue
 }
 $answer
 exit 0

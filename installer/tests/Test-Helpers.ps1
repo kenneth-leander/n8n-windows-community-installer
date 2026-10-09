@@ -3,7 +3,8 @@
 # when they say something is wrong, when they print nonsense, when they fail without a word, and when they never answer.
 # Nothing may fail quietly: whatever happened is in the line the installer gets, so that it can show it.
 #
-# On Windows, run it with Windows PowerShell 5.1, which is what the installer uses on a user's computer:
+# On Windows, run it with Windows PowerShell 5.1, which is what the installer uses on a user's computer (and which has
+# its own ways, one of them found by this very test: Start-Process loses the exit code of the program it starts):
 #   powershell -NoProfile -ExecutionPolicy Bypass -File installer\tests\Test-Helpers.ps1
 # It also runs with PowerShell 7 on Linux, except for the cases that need wsl.exe's UTF-16 output, which are left out there.
 [CmdletBinding()]
@@ -19,13 +20,51 @@ $script:problems = @()
 # The program that runs the helper scripts and the stand-in: the one this script runs in.
 $shell = (Get-Process -Id $PID).Path
 
-# The stand-in. It answers as the environment variables FAKE_* say, so one file serves every case:
+# The stand-in for docker.exe and wsl.exe. It answers as the environment variables FAKE_* say, so one program serves every case:
 #   FAKE_OUT, FAKE_CODE     what it prints and its exit code
 #   FAKE_OUT_V, FAKE_CODE_V the same when it is asked with -v (wsl -l -v), if they are given
 #   FAKE_UTF16=1            print as UTF-16, like wsl.exe does
 #   FAKE_ERR                what it writes to its error output
 #   FAKE_SLEEP              seconds to wait before it does anything (to look like a program that never answers)
-@'
+if ($onWindows) {
+    # A program of its own, like docker.exe and wsl.exe. A batch file would not do: cmd.exe takes a | in the arguments for a
+    # pipe, and stopping it would leave the PowerShell that it started running.
+    $fake = Join-Path $work 'fake.exe'
+    Add-Type -OutputAssembly $fake -OutputType ConsoleApplication -TypeDefinition @'
+using System;
+using System.Text;
+using System.Threading;
+public static class FakeProgram
+{
+    public static int Main(string[] args)
+    {
+        string text = Environment.GetEnvironmentVariable("FAKE_OUT");
+        string code = Environment.GetEnvironmentVariable("FAKE_CODE");
+        if (Array.IndexOf(args, "-v") >= 0)
+        {
+            string textV = Environment.GetEnvironmentVariable("FAKE_OUT_V");
+            string codeV = Environment.GetEnvironmentVariable("FAKE_CODE_V");
+            if (!string.IsNullOrEmpty(textV)) { text = textV; }
+            if (!string.IsNullOrEmpty(codeV)) { code = codeV; }
+        }
+        string sleep = Environment.GetEnvironmentVariable("FAKE_SLEEP");
+        if (!string.IsNullOrEmpty(sleep)) { Thread.Sleep(int.Parse(sleep) * 1000); }
+        if (!string.IsNullOrEmpty(text))
+        {
+            bool utf16 = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("FAKE_UTF16"));
+            byte[] bytes = utf16 ? Encoding.Unicode.GetBytes(text) : Encoding.UTF8.GetBytes(text);
+            using (System.IO.Stream o = Console.OpenStandardOutput()) { o.Write(bytes, 0, bytes.Length); o.Flush(); }
+        }
+        string err = Environment.GetEnvironmentVariable("FAKE_ERR");
+        if (!string.IsNullOrEmpty(err)) { Console.Error.Write(err); }
+        return string.IsNullOrEmpty(code) ? 0 : int.Parse(code);
+    }
+}
+'@
+}
+else {
+    # The same as a shell script that starts a PowerShell script.
+    @'
 $text = $env:FAKE_OUT
 $code = $env:FAKE_CODE
 if ($args -contains '-v') {
@@ -42,12 +81,6 @@ if ($text) {
 if ($env:FAKE_ERR) { [Console]::Error.Write($env:FAKE_ERR) }
 exit ([int]$code)
 '@ | Set-Content -Path (Join-Path $work 'fake.ps1') -Encoding ascii
-
-if ($onWindows) {
-    $fake = Join-Path $work 'fake.cmd'
-    "@echo off`r`n`"$shell`" -NoProfile -ExecutionPolicy Bypass -File `"%~dp0fake.ps1`" %*`r`nexit /b %ERRORLEVEL%`r`n" | Set-Content -Path $fake -Encoding ascii
-}
-else {
     $fake = Join-Path $work 'fake'
     "#!/bin/sh`nexec '$shell' -NoProfile -File `"`$(dirname `"`$0`")/fake.ps1`" `"`$@`"`n" | Set-Content -Path $fake -Encoding ascii -NoNewline
     & chmod +x $fake
@@ -82,6 +115,7 @@ Write-Host '=== docker-probe.ps1'
 $probe = @('-DockerPath', $fake)
 Check 'Docker is ready' (Invoke-Helper 'docker-probe.ps1' $probe @{ FAKE_OUT = '27.3.1|linux' }) '^ready\|27\.3\.1$'
 Check 'Docker is set to Windows containers' (Invoke-Helper 'docker-probe.ps1' $probe @{ FAKE_OUT = '27.3.1|windows' }) '^windows\|27\.3\.1$'
+Check 'Docker is ready and also complains about something' (Invoke-Helper 'docker-probe.ps1' $probe @{ FAKE_OUT = '27.3.1|linux'; FAKE_ERR = 'WARNING: a context could not be read' }) '^ready\|27\.3\.1$'
 Check 'Docker says it cannot connect' (Invoke-Helper 'docker-probe.ps1' $probe @{ FAKE_ERR = 'error during connect: open //./pipe/dockerDesktopLinuxEngine: The system cannot find the file specified.'; FAKE_CODE = '1' }) `
     '^stopped\|said: error during connect: open //\./pipe/dockerDesktopLinuxEngine: The system cannot find the file specified\.$'
 Check 'Docker prints nonsense' (Invoke-Helper 'docker-probe.ps1' $probe @{ FAKE_OUT = 'hello' }) '^stopped\|Docker answered something unexpected: hello$'
@@ -93,9 +127,12 @@ $notAProgram = Join-Path $work 'not-a-program.txt'
 Set-Content -Path $notAProgram -Value 'text'
 Check 'docker.exe cannot be started' (Invoke-Helper 'docker-probe.ps1' @('-DockerPath', $notAProgram) @{}) '^stopped\|Windows could not start docker\.exe: '
 # With docker.exe off the PATH, the answer is "missing" (and "missing|installed" on a computer that has Docker Desktop in its usual folder).
+# The PATH is an empty folder here: some computers keep docker.exe in a folder that is always on the PATH.
+$emptyFolder = Join-Path $work 'empty'
+New-Item -ItemType Directory -Path $emptyFolder -Force | Out-Null
 $savedPath = $env:PATH
 try {
-    if ($onWindows) { $env:PATH = "$env:SystemRoot\System32" } else { $env:PATH = '/usr/bin:/bin' }
+    $env:PATH = $emptyFolder
     Check 'Docker is not installed' (Invoke-Helper 'docker-probe.ps1' @() @{}) '^missing(\|installed)?$'
 }
 finally { $env:PATH = $savedPath }

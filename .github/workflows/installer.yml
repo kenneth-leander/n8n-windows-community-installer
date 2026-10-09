@@ -110,26 +110,6 @@ jobs:
           name: n8n-installer
           path: dist
 
-      # The two scripts that look at the computer, run for real under the PowerShell that comes with Windows (5.1), on
-      # a computer that may or may not have Docker and WSL. Whatever they find, each line has to have the shape the
-      # installer reads: a way of running n8n that cannot be used always comes with the reason.
-      - name: Helper scripts under Windows PowerShell 5.1
-        shell: pwsh
-        run: |
-          foreach ($name in 'docker-probe', 'wsl-list') {
-            $out = @(& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "installer\scripts\$name.ps1")
-            $code = $LASTEXITCODE
-            Write-Host "$name printed: [$($out -join ' // ')]"
-            if ($code -ne 0) { throw "$name.ps1 exited with $code" }
-            if ($name -eq 'docker-probe') {
-              if ($out.Count -ne 1 -or "$($out[0])" -notmatch '^(ready\|[^|]+|windows\|[^|]+|stopped\|.+|missing(\|installed)?)$') { throw 'docker-probe.ps1 did not print exactly one line of a known shape' }
-            } else {
-              foreach ($line in $out) {
-                if ("$line" -notmatch '^(![ -~]+|[ -~]+\|[12]\|[ -~]+)$') { throw "wsl-list.ps1 printed a line of an unknown shape: [$line]" }
-              }
-            }
-          }
-
       # The system drive (C:) of GitHub's Windows computers is very slow for the many small files npm writes: n8n takes
       # more than 20 minutes to install there and about 6 minutes on drive D: (where RUNNER_TEMP is). So the test
       # installs and keeps npm's download cache on drive D:. On an ordinary PC this makes no difference.
@@ -212,6 +192,43 @@ jobs:
         with:
           name: n8n-installer
           path: dist
+
+      # The two scripts that look at the computer, run for real under the PowerShell that comes with Windows (5.1), on a
+      # computer that has Docker and may or may not have WSL. What the Docker script says has to agree with what Docker
+      # itself answers to the same question (this is how a check that always said "stopped" under 5.1 went unnoticed),
+      # and every line of the WSL script has to have the shape the installer reads.
+      - name: Helper scripts under Windows PowerShell 5.1
+        shell: pwsh
+        run: |
+          $ps51 = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+
+          $probe = @(& $ps51 -NoProfile -ExecutionPolicy Bypass -File installer\scripts\docker-probe.ps1)
+          $code = $LASTEXITCODE
+          Write-Host "docker-probe printed: [$($probe -join ' // ')]"
+          if ($code -ne 0) { throw "docker-probe.ps1 exited with $code" }
+          $docker = Get-Command docker.exe -ErrorAction SilentlyContinue
+          if (-not $docker) {
+            $expected = '^missing'
+          } else {
+            $answer = @(& $docker.Source version --format '{{.Server.Version}}|{{.Server.Os}}' 2>$null)
+            Write-Host "Docker itself answered: [$($answer -join ' // ')] (exit code $LASTEXITCODE)"
+            if ($LASTEXITCODE -eq 0 -and "$($answer[0])" -match '^([^|]+)\|([a-z]+)$') {
+              $kind = if ($Matches[2] -eq 'linux') { 'ready' } else { 'windows' }
+              $expected = '^' + $kind + '\|' + [regex]::Escape($Matches[1]) + '$'
+            } else {
+              $expected = '^stopped\|'
+            }
+          }
+          if ($probe.Count -ne 1 -or "$($probe[0])" -notmatch $expected) { throw "docker-probe.ps1 printed [$($probe -join ' // ')], which does not agree with Docker (expected /$expected/)" }
+
+          $list = @(& $ps51 -NoProfile -ExecutionPolicy Bypass -File installer\scripts\wsl-list.ps1)
+          $code = $LASTEXITCODE
+          Write-Host "wsl-list printed: [$($list -join ' // ')]"
+          if ($code -ne 0) { throw "wsl-list.ps1 exited with $code" }
+          foreach ($line in $list) {
+            if ("$line" -notmatch '^(![ -~]+|[ -~]+\|[12]\|[ -~]+)$') { throw "wsl-list.ps1 printed a line of an unknown shape: [$line]" }
+            if ("$line" -match 'ended with code \D|could not start') { throw "wsl-list.ps1 printed a problem with its own check: [$line]" }
+          }
 
       # The helper scripts that ask Docker and WSL what they are doing, against stand-ins for docker.exe and wsl.exe that
       # work, complain, print nonsense, fail without a word or never answer. Run with Windows PowerShell 5.1, as on a user's PC.
