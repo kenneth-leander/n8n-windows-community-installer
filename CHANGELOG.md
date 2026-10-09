@@ -7,6 +7,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-10-09
+
+### Added
+
+- **A real Windows installer, `n8n-Installer.exe`**, in place of the batch file. One window with an **Express** install (Docker when Docker is running, otherwise Windows in a folder of its own) and a **Custom** install, and four ways to run n8n: Docker, Windows in a folder of its own, Windows for this user account, and Linux inside Windows (WSL2). It needs no administrator rights.
+- Start menu entries (Start n8n, Open n8n in my web browser, Stop n8n for Docker and Linux, the n8n folder, Read me, Uninstall n8n), an entry in Windows Settings under Apps, and an uninstaller that asks whether to keep your workflows and passwords (it keeps them by default).
+- Installing again into the same folder updates n8n and keeps your data. Several installs can live side by side, each in its own folder.
+- A silent install for scripts (`/VERYSILENT` with `/METHOD`, `/PORT` and other switches), with exit codes and a log in `%LOCALAPPDATA%\n8n-installer\logs`. Everything is described in `installer/README.md`.
+- A way that cannot be used is greyed out, and a highlighted line says why and what to do about it (for example, Docker is not running), using the program's own words. **Check again** asks again.
+- When Node.js 22 cannot be added inside Linux (WSL2), the error now shows the real reason (for example, that Linux cannot reach nodejs.org) instead of only "Version '22' not found".
+- A checksum of the download in `SHA256SUMS.txt`.
+
+### Changed
+
+- **The old batch installer moved to the `legacy` folder**, together with its README. It is no longer maintained.
+- The ways that use npm (Windows in a folder, Windows for this user account, Linux inside Windows) stay on n8n 2.x, because n8n 3.0 stops supporting npm installs. Docker installs the newest n8n 2.x, or the n8n 3 preview if you choose it.
+- The installer is built and tested by GitHub Actions, which now starts only when it is run by hand.
+
 ## [0.2] - 2026-08-06
 
 ### Changed

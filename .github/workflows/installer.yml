@@ -1,0 +1,295 @@
+name: Installer
+
+# Builds the Windows installer (installer/n8n-installer.iss) with Inno Setup. Nothing here starts by itself:
+# open the Actions tab, choose Installer, Run workflow, and tick what you want.
+#
+#   (nothing ticked)  Only the build runs (about a minute). The installer is kept as a download on the page of the run.
+#   publish           Builds the finished installer with a clean version number and commits it to the branch that was
+#                     chosen, as n8n-Installer.exe next to SHA256SUMS.txt. This is how the .exe in the repository is made.
+#   tests             Also runs the tests on Windows: the folder and the user-account ways for real (about 15 minutes
+#                     each) and every way, including Docker and Linux (WSL2), in test mode. Docker and WSL2 installs cannot
+#                     run on GitHub's computers (no Linux containers, no WSL2), so for those two the installer is run in
+#                     test mode (/DRYRUN) to check which commands it would run; the real thing is tested by hand: see
+#                     installer/README.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Put the finished installer into the repository as n8n-Installer.exe'
+        type: boolean
+        default: false
+      tests:
+        description: 'Also run the tests on Windows (about 20 minutes)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  # The Inno Setup compiler is fetched from NuGet and checked against this exact hash, so a build
+  # always uses the same compiler bytes. To move to a newer Inno Setup, change both lines together.
+  INNO_VERSION: '6.7.3'
+  INNO_SHA256: 'f780898e402ff80612cc8d9fcb8c6e02932bd1cb4c900ffdaa31f9341cfb49f4'
+
+jobs:
+  build:
+    name: Build the installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the scripts and templates
+        shell: pwsh
+        run: |
+          $bad = 0
+          # PowerShell scripts must parse.
+          Get-ChildItem installer -Recurse -Filter *.ps1 | ForEach-Object {
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errors)
+            if ($errors) { $errors | ForEach-Object { Write-Host "::error file=$($_.Extent.File)::$($_.Message)" }; $bad++ }
+          }
+          # Launchers and helper scripts are plain ASCII, so Windows reads them the same on every computer.
+          Get-ChildItem installer/templates, installer/scripts -File | ForEach-Object {
+            if ([IO.File]::ReadAllBytes($_.FullName) | Where-Object { $_ -gt 127 } | Select-Object -First 1) {
+              Write-Host "::error file=$($_.FullName)::contains characters outside plain ASCII"; $bad++
+            }
+          }
+          # Every @@MARKER@@ in a template has to be filled in by the install code (SetVar), or it would end up in the user's files.
+          $code = (Get-ChildItem installer/code -Filter *.iss | ForEach-Object { Get-Content $_.FullName -Raw }) -join "`n"
+          foreach ($file in Get-ChildItem installer/templates -File) {
+            $markers = [regex]::Matches((Get-Content $file.FullName -Raw), '@@([A-Z0-9_]+)@@') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
+            foreach ($marker in $markers) {
+              if ($code -notmatch ("SetVar\('" + $marker + "'")) {
+                Write-Host "::error file=$($file.FullName)::@@$marker@@ is never filled in (no SetVar('$marker', ...) in installer/code)"; $bad++
+              }
+            }
+          }
+          if ($bad) { exit 1 }
+
+      - name: Get the Inno Setup compiler
+        shell: pwsh
+        run: |
+          $package = Join-Path $env:RUNNER_TEMP 'innosetup.zip'
+          Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/Tools.InnoSetup/$env:INNO_VERSION" -OutFile $package
+          $hash = (Get-FileHash $package -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne $env:INNO_SHA256) { throw "Inno Setup package has hash $hash, expected $env:INNO_SHA256" }
+          Expand-Archive -Path $package -DestinationPath (Join-Path $env:RUNNER_TEMP 'innosetup')
+
+      - name: Build n8n-Installer.exe
+        shell: pwsh
+        env:
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          $iss = Get-Content installer/n8n-installer.iss -Raw
+          $base = [regex]::Match($iss, '#define AppVersion "([0-9]+\.[0-9]+\.[0-9]+)').Groups[1].Value
+          if (-not $base) { throw 'Could not read the version from n8n-installer.iss' }
+          if ($env:PUBLISH -eq 'true') {
+            $version = $base
+          } else {
+            $version = "$base-dev.$env:GITHUB_RUN_NUMBER"
+          }
+          $numeric = "$base.$env:GITHUB_RUN_NUMBER"
+          Write-Host "Building version $version ($numeric)"
+          & (Join-Path $env:RUNNER_TEMP 'innosetup\tools\ISCC.exe') "/DAppVersion=$version" "/DAppVersionNumeric=$numeric" installer\n8n-installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
+          $exe = 'installer\dist\n8n-Installer.exe'
+          $sum = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          "$sum  n8n-Installer.exe" | Set-Content -Path installer\dist\SHA256SUMS.txt -Encoding ascii
+          Write-Host "SHA-256 $sum"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: n8n-installer
+          path: |
+            installer/dist/n8n-Installer.exe
+            installer/dist/SHA256SUMS.txt
+          if-no-files-found: error
+
+  # Puts the finished installer into the repository, so that it is listed next to the README. The commit is made in the
+  # name of the repository owner, only when publish is ticked, and only on the branch the run was started on.
+  publish:
+    name: Put n8n-Installer.exe into the repository
+    if: ${{ inputs.publish }}
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: n8n-installer
+          path: dist
+      - name: Commit the installer
+        run: |
+          cp dist/n8n-Installer.exe n8n-Installer.exe
+          cp dist/SHA256SUMS.txt SHA256SUMS.txt
+          hash=$(cut -d' ' -f1 SHA256SUMS.txt | tr -d '\r')
+          git config user.name 'kenneth-leander'
+          git config user.email '190708128+kenneth-leander@users.noreply.github.com'
+          git add n8n-Installer.exe SHA256SUMS.txt
+          git commit -m "Add n8n-Installer.exe, built by GitHub Actions from this branch (SHA-256 $hash)"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+  test-folder:
+    name: Test "in a folder of its own" (Windows)
+    if: ${{ inputs.tests }}
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: n8n-installer
+          path: dist
+
+      # The system drive (C:) of GitHub's Windows computers is very slow for the many small files npm writes: n8n takes
+      # more than 20 minutes to install there and about 6 minutes on drive D: (where RUNNER_TEMP is). So the test
+      # installs and keeps npm's download cache on drive D:. On an ordinary PC this makes no difference.
+      - name: Use the fast drive for the test
+        shell: pwsh
+        run: |
+          "npm_config_cache=$env:RUNNER_TEMP\npm-cache" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Install, start, update and uninstall
+        shell: pwsh
+        run: ./installer/tests/Test-Install.ps1 -Installer dist\n8n-Installer.exe -Method folder -Dir "$env:RUNNER_TEMP\n8n-ci-folder"
+
+      - name: Collect logs
+        if: always()
+        shell: pwsh
+        run: |
+          $to = Join-Path $env:RUNNER_TEMP 'ci-logs'
+          New-Item -ItemType Directory -Force -Path $to | Out-Null
+          Copy-Item "$env:LOCALAPPDATA\n8n-installer\logs\*" $to -ErrorAction SilentlyContinue
+          Copy-Item "$env:RUNNER_TEMP\setup-*.log", "$env:RUNNER_TEMP\n8n-*.log" $to -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: logs-test-folder
+          path: ${{ runner.temp }}/ci-logs
+          if-no-files-found: ignore
+
+  test-global:
+    name: Test "for this user account" (Windows, Node.js 22)
+    if: ${{ inputs.tests }}
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          name: n8n-installer
+          path: dist
+
+      # Same reason as in the folder test: npm's global folder and its download cache go to drive D: (GitHub's
+      # computers keep both on drive C: by default). The folder is added to the PATH, so the n8n command is found.
+      - name: Use the fast drive for the test
+        shell: pwsh
+        run: |
+          Write-Host "npm settings of this computer: global folder $(npm prefix -g), cache $(npm config get cache)"
+          "npm_config_cache=$env:RUNNER_TEMP\npm-cache" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "npm_config_prefix=$env:RUNNER_TEMP\npm-global" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "$env:RUNNER_TEMP\npm-global" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Install, start, update and uninstall
+        shell: pwsh
+        run: ./installer/tests/Test-Install.ps1 -Installer dist\n8n-Installer.exe -Method global -Dir "$env:RUNNER_TEMP\n8n-ci-global" -Port 5689
+
+      - name: Collect logs
+        if: always()
+        shell: pwsh
+        run: |
+          $to = Join-Path $env:RUNNER_TEMP 'ci-logs'
+          New-Item -ItemType Directory -Force -Path $to | Out-Null
+          Copy-Item "$env:LOCALAPPDATA\n8n-installer\logs\*" $to -ErrorAction SilentlyContinue
+          Copy-Item "$env:RUNNER_TEMP\setup-*.log", "$env:RUNNER_TEMP\n8n-*.log" $to -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: logs-test-global
+          path: ${{ runner.temp }}/ci-logs
+          if-no-files-found: ignore
+
+  test-every-way:
+    name: Test every way in test mode (Windows)
+    if: ${{ inputs.tests }}
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: n8n-installer
+          path: dist
+
+      # The two scripts that look at the computer, run for real under the PowerShell that comes with Windows (5.1), on a
+      # computer that has Docker and may or may not have WSL. What the Docker script says has to agree with what Docker
+      # itself answers to the same question (this is how a check that always said "stopped" under 5.1 went unnoticed),
+      # and every line of the WSL script has to have the shape the installer reads.
+      - name: Helper scripts under Windows PowerShell 5.1
+        shell: pwsh
+        run: |
+          $ps51 = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+
+          $probe = @(& $ps51 -NoProfile -ExecutionPolicy Bypass -File installer\scripts\docker-probe.ps1)
+          $code = $LASTEXITCODE
+          Write-Host "docker-probe printed: [$($probe -join ' // ')]"
+          if ($code -ne 0) { throw "docker-probe.ps1 exited with $code" }
+          $docker = Get-Command docker.exe -ErrorAction SilentlyContinue
+          if (-not $docker) {
+            $expected = '^missing'
+          } else {
+            $answer = @(& $docker.Source version --format '{{.Server.Version}}|{{.Server.Os}}' 2>$null)
+            Write-Host "Docker itself answered: [$($answer -join ' // ')] (exit code $LASTEXITCODE)"
+            if ($LASTEXITCODE -eq 0 -and "$($answer[0])" -match '^([^|]+)\|([a-z]+)$') {
+              $kind = if ($Matches[2] -eq 'linux') { 'ready' } else { 'windows' }
+              $expected = '^' + $kind + '\|' + [regex]::Escape($Matches[1]) + '$'
+            } else {
+              $expected = '^stopped\|'
+            }
+          }
+          if ($probe.Count -ne 1 -or "$($probe[0])" -notmatch $expected) { throw "docker-probe.ps1 printed [$($probe -join ' // ')], which does not agree with Docker (expected /$expected/)" }
+
+          $list = @(& $ps51 -NoProfile -ExecutionPolicy Bypass -File installer\scripts\wsl-list.ps1)
+          $code = $LASTEXITCODE
+          Write-Host "wsl-list printed: [$($list -join ' // ')]"
+          if ($code -ne 0) { throw "wsl-list.ps1 exited with $code" }
+          foreach ($line in $list) {
+            if ("$line" -notmatch '^(![ -~]+|[ -~]+\|[12]\|[ -~]+)$') { throw "wsl-list.ps1 printed a line of an unknown shape: [$line]" }
+            if ("$line" -match 'ended with code \D|could not start') { throw "wsl-list.ps1 printed a problem with its own check: [$line]" }
+          }
+
+      # The helper scripts that ask Docker and WSL what they are doing, against stand-ins for docker.exe and wsl.exe that
+      # work, complain, print nonsense, fail without a word or never answer. Run with Windows PowerShell 5.1, as on a user's PC.
+      - name: Helper scripts against stand-ins for Docker and WSL
+        shell: pwsh
+        run: |
+          & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File installer\tests\Test-Helpers.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Test-Helpers.ps1 exited with $LASTEXITCODE" }
+
+      - name: Docker, Linux (WSL2) and the rest, without installing anything
+        shell: pwsh
+        run: ./installer/tests/Test-DryRun.ps1 -Installer dist\n8n-Installer.exe
+
+  test-docker-tag:
+    name: Test the Docker version lookup
+    if: ${{ inputs.tests }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ask Docker Hub which n8n versions exist
+        shell: pwsh
+        run: |
+          $out = @(& ./installer/scripts/docker-tag.ps1)
+          $out | ForEach-Object { Write-Host $_ }
+          if (-not ($out | Where-Object { $_ -match '^v2=2\.\d+\.\d+$' })) { throw 'no 2.x.y version was found' }
+          if (-not ($out | Where-Object { $_ -match '^v3=\S+$' })) { throw 'no 3.x version was found' }
