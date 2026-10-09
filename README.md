@@ -23,7 +23,7 @@ An unofficial, community-created installation wizard for [n8n](https://n8n.io) o
 
 n8n 3.0 is Docker-only and no longer supports npm installs. This release makes sure an installation made with this installer cannot move to 3.0 on its own.
 
-- **Every install method stays on n8n 2.x.** npm installs use `n8n@2`, the update check in the generated start scripts never offers a 3.x version, and Docker installs pull an exact 2.x image tag instead of `latest`
+- **Every install method stays on n8n 2.x.** npm installs ask for the newest 2.x release, the update check in the generated start scripts never offers a 3.x version, and Docker installs pull an exact 2.x image tag instead of `latest`
 - **Docker installs show the exact version** they installed, and the generated `README.txt` explains how to update without jumping to n8n 3.0
 - **n8n 3.0 is not supported yet.** It will arrive with the new installer. See the [n8n 3.0 Notice](#n8n-30-notice)
 
@@ -84,7 +84,7 @@ It is designed for local development, personal automation, and small Windows-hos
   - Native installs require Node.js `20.19+` or `22.x LTS`
   - npm is capped at `10.x`, the version bundled with Node.js 22 LTS
   - Newer release lines are blocked before `npm install`
-  - Every install method stays on n8n 2.x: npm installs use `n8n@2` and Docker installs use an exact 2.x image tag
+  - Every install method stays on n8n 2.x: npm installs ask for the newest 2.x release and Docker installs use an exact 2.x image tag
   - Docker installs avoid forcing external task-runner flags and let n8n use its default runner behavior
 
 - **Guided setup and safety checks**
@@ -122,7 +122,7 @@ It is designed for local development, personal automation, and small Windows-hos
 
 Avoid Node.js 24 and newer for native npm installs. Node.js and npm ship as one package, and newer Node.js lines bundle newer npm. npm 12 blocks dependency install scripts by default, which leaves `sqlite3` without its native binary and stops n8n from opening its database. Node.js 22 LTS with npm 10 is the pairing this installer targets.
 
-On Node.js 22, `npm install n8n@2` installs n8n 2.35.7, the newest release that supports Node.js 22. n8n 2.36 and newer declare Node.js 24 or later as their minimum.
+On Node.js 22, npm installs n8n 2.35.7, the newest release that supports Node.js 22. n8n 2.36 and newer declare Node.js 24 or later as their minimum.
 
 ### Docker requirements
 
@@ -158,7 +158,7 @@ If WSL is enabled, the installer will automatically detect your Linux distributi
 
 ### Global Installation
 
-Uses `npm install -g n8n@2`.
+Installs the newest n8n 2.x with `npm install -g n8n@2`.
 
 - Best when you want the `n8n` command available from any terminal
 - Creates the launcher and generated README under `%USERPROFILE%\n8n`
@@ -167,7 +167,7 @@ Uses `npm install -g n8n@2`.
 
 ### Folder-Specific Installation
 
-Uses `npm install n8n@2` inside a folder you choose.
+Installs the newest n8n 2.x with `npm install n8n@2` inside a folder you choose.
 
 - Best for isolated installs, testing, and multiple side-by-side instances
 - Keeps the package, launcher, generated README, and data base path together
@@ -403,6 +403,8 @@ For folder installs, run this in the installation folder:
 ```bash
 npm install n8n@2
 ```
+
+The `@2` means "the newest 2.x version", so npm keeps n8n on version 2 and never moves you to n8n 3.0 by accident.
 
 For Docker installs, the simplest way is to run `n8n-Installer.bat` again. Choose the same container name, answer `1` to replace the existing container, and enter the same volume name. It looks up the newest stable 2.x release for you.
 

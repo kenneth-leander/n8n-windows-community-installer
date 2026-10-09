@@ -284,7 +284,7 @@ echo  n8n Program Installation
 echo  ────────────────────────────────────────
 echo.
 echo  1. Global Installation
-echo     • npm install -g n8n@2
+echo     • Installs the newest n8n 2.x with npm
 echo     • n8n command available system-wide
 echo     • Standard installation method
 echo     • NOTE: Will overwrite existing global n8n
@@ -962,6 +962,7 @@ pause
 exit /b 1
 
 :INSTALL_GLOBAL
+echo  Installing the newest n8n 2.x...
 echo  Running: npm install -g n8n@2
 echo  This may take a few minutes...
 echo.
@@ -985,6 +986,7 @@ echo  [✓] n8n installed globally
 goto CREATE_START_SCRIPT
 
 :INSTALL_FOLDER
+echo  Installing the newest n8n 2.x...
 echo  Running: npm install n8n@2 in !N8N_INSTALL_PATH!
 echo  This may take a few minutes...
 echo.
@@ -1983,6 +1985,7 @@ echo.
 echo  Step 3 of 4: Installing n8n in !WSL_DISTRO!
 echo  ────────────────────────────────────────
 echo.
+echo  Installing the newest n8n 2.x...
 echo  Running: npm install -g n8n@2
 echo  This may take a few minutes...
 echo.
@@ -2188,6 +2191,7 @@ if "!WSL_USE_ROOT!"=="YES" (
     echo    wsl -d !WSL_DISTRO! --exec sh -c "export PATH=!WSL_RUNPATH!; npm install -g n8n@2 --allow-scripts=sqlite3" >> "!README_FILE!"
     echo    ^(installed under your user account, so root is not used^) >> "!README_FILE!"
 )
+echo    The @2 at the end means the newest 2.x version, so n8n stays on version 2. >> "!README_FILE!"
 echo. >> "!README_FILE!"
 echo  The PATH matters here too. Without it npm may resolve to a different >> "!README_FILE!"
 echo  Node.js version and install n8n somewhere the launcher never reads. >> "!README_FILE!"

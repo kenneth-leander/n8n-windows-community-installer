@@ -12,10 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Every install method is pinned to n8n 2.x**, ahead of n8n 3.0, which is Docker-only and no longer ships a runnable npm package:
-  - Global, folder and WSL2 installs run `npm install n8n@2`, so they stay on 2.x whatever npm's `latest` tag becomes. On Node.js 22 this installs n8n 2.35.7, the newest release that supports Node.js 22
-  - The update check in generated start scripts installs `n8n@2` and ignores a newer major version if one is ever published. Start scripts made by 0.2 keep their old behaviour until the installer is run again
+  - Global, folder and WSL2 installs ask npm for the newest 2.x release (`npm install n8n@2`), so they stay on 2.x whatever npm's `latest` tag becomes. On Node.js 22 this installs n8n 2.35.7, the newest release that supports Node.js 22
+  - The update check in generated start scripts installs the newest 2.x release and ignores a newer major version if one is ever published. Start scripts made by 0.2 keep their old behaviour until the installer is run again
   - Docker installs no longer pull the moving `latest` image, which moves to 3.0 once it is released. Docker has no floating 2.x tag, so the installer asks Docker Hub which exact 2.x release the `stable` tag points to and installs that tag. If the lookup fails it falls back to `2.42.5` and says so. The completion screen shows the installed version, and the generated `README.txt` explains how to update without jumping to 3.0
-- The manual update commands in the README use `n8n@2` instead of `n8n@latest`, and Docker updates use an exact 2.x tag
+- The manual update commands in the README use `n8n@2` (the newest 2.x release) instead of `n8n@latest`, and Docker updates use an exact 2.x tag
 - `README.md`: new 0.2.1 section, update instructions and the n8n 3.0 notice are updated. 3.0 support is now described as arriving with the new installer, since this version installs 2.x only
 
 ## [0.2] - 2026-08-06
