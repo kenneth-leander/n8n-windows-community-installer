@@ -303,16 +303,23 @@ end;
 // Folders
 // ---------------------------------------------------------------------------
 
-function DirIsEmpty(const Dir: String): Boolean;
+// True when the folder is empty or holds nothing but what an n8n install of this installer leaves behind: its own
+// files, and the data that an uninstall keeps (.n8n). A file of anything else makes it False.
+function DirHasOnlyN8nFiles(const Dir: String): Boolean;
 var
   Found: TFindRec;
+  Name, OwnNames: String;
 begin
   Result := True;
+  OwnNames := '|.n8n|node|node_modules|node_modules.old|bin|support|package.json|package-lock.json|.npmrc|' +
+    'start-n8n.cmd|stop-n8n.cmd|n8n-env.cmd|readme.txt|n8n.ico|n8n-installer.ini|unins000.exe|unins000.dat|unins000.msg|';
   if FindFirst(Dir + '\*', Found) then
   begin
     try
       repeat
-        if (Found.Name <> '.') and (Found.Name <> '..') then
+        Name := Lowercase(Found.Name);
+        if (Name <> '.') and (Name <> '..') and (Pos('|' + Name + '|', OwnNames) = 0) and
+           (Copy(Name, 1, 6) <> 'node-v') then   // Node.js unpacked by an install that was interrupted
         begin
           Result := False;
           Break;

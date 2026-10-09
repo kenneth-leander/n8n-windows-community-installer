@@ -17,6 +17,7 @@ param(
     [Parameter(Mandatory = $true)][string]$Dir,
     [int]$Port = 5688,
     [int]$StartTimeoutSec = 300,
+    [int]$PageTimeoutSec = 120,
     [int]$SetupTimeoutSec = 1500,
     [string]$WslDistro = ''
 )
@@ -235,11 +236,20 @@ if (-not (Wait-Health $StartTimeoutSec)) {
     Stop-Here "n8n did not answer on port $Port within $StartTimeoutSec seconds."
 }
 Check $true "n8n answers on http://localhost:$Port/healthz"
-try {
-    $page = Invoke-WebRequest -Uri "http://localhost:$Port/" -UseBasicParsing -TimeoutSec 20
-    Check ($page.StatusCode -eq 200 -and $page.Content -match 'n8n') 'the n8n web page loads'
+# n8n answers /healthz a little before its web pages are ready (the page is a 404 for a few seconds), so wait for it.
+$pageError = 'no answer yet'
+$deadline = (Get-Date).AddSeconds($PageTimeoutSec)
+$pageOk = $false
+while (-not $pageOk -and (Get-Date) -lt $deadline) {
+    try {
+        $page = Invoke-WebRequest -Uri "http://localhost:$Port/" -UseBasicParsing -TimeoutSec 20
+        if ($page.StatusCode -eq 200 -and $page.Content -match 'n8n') { $pageOk = $true }
+        else { $pageError = "status $($page.StatusCode), and no n8n in the page" }
+    }
+    catch { $pageError = $_.Exception.Message }
+    if (-not $pageOk) { Start-Sleep -Seconds 3 }
 }
-catch { Check $false "the n8n web page loads ($($_.Exception.Message))" }
+Check $pageOk "the n8n web page loads (last answer: $pageError)"
 
 # The helper that the Start n8n shortcut uses to open the browser.
 if (Test-Path "$Dir\support\wait-n8n.ps1") {

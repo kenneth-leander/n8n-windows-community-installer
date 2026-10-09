@@ -94,8 +94,9 @@ begin
   end
   else if DirExists(Dir) and (ChosenMethod = MethodFolder) and not FileExists(Dir + '\node_modules\n8n\package.json') then
   begin
-    // Something else lives here. n8n would add its own files next to them.
-    if not DirIsEmpty(Dir) then
+    // Something else lives here. n8n would add its own files next to them. (The data that an uninstall keeps does
+    // not count: installing again into that folder picks it up.)
+    if not DirHasOnlyN8nFiles(Dir) then
       Result := AskYesNo('This folder already has other files in it.' + #13#10#13#10 +
         'n8n will add its own files (node, node_modules, package.json and a few more) next to them. ' +
         'An empty folder is better. Use this folder anyway?', False);

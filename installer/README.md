@@ -98,6 +98,11 @@ tests\              Test-Install.ps1, the end to end test that CI runs
   for the folder way and for the user-account way: install, start n8n, wait until it answers, stop it,
   install again over it (the data must stay), uninstall (keep the data), install, uninstall and delete the data.
   It also runs the PowerShell helpers on Windows PowerShell 5.1 and asks Docker Hub for the n8n versions.
+  The test installs on drive D: and keeps npm's download cache there: the system drive (C:) of GitHub's Windows
+  computers is so slow for the thousands of small files npm writes that n8n needs more than 20 minutes to install
+  on it (with or without this installer), against about 6 minutes on D:. While the installer runs, the test says
+  every minute which programs it started and what the installer's log says, and it stops an installer that takes
+  longer than 25 minutes, so a stuck run still ends with logs.
 * **Docker and WSL2 cannot run on GitHub's computers.** There, `tests\Test-DryRun.ps1` runs the installer and the
   uninstaller in test mode for every way and checks which commands they would start (the Docker command line,
   the names, the ports, what is removed again). To test them for real, use a computer that has them:
@@ -106,7 +111,8 @@ tests\              Test-Install.ps1, the end to end test that CI runs
 * **Test mode.** `/DRYRUN` walks through an install without changing anything (the install folder only gets the
   uninstaller and a note about the install, so the uninstaller can be tried). With it, `/FAKEDOCKER=ready|windows|stopped|missing`,
   `/FAKENODE=22.11.0` and `/FAKEWSL="Ubuntu|2|Running;Debian|1|Stopped"` pretend to have found those things,
-  `/DRYRUN=fail` makes every program the installer would start fail, and `/SLOW=3` makes every step take 3 seconds.
+  `/DRYRUN=fail` makes every program the installer would start fail, `/SLOW=3` makes every step take 3 seconds, and
+  `/SHOWFILES` prints the start script and the notes it would write, with every setting filled in.
   These are only honoured together with `/DRYRUN`. The uninstaller takes `/DRYRUN` as well: it then says which
   programs it would start (like `docker rm`) and starts none.
 

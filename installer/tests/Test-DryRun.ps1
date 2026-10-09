@@ -69,6 +69,7 @@ function Invoke-Logged([string]$exe, [string[]]$arguments, [string]$logPrefix, [
 #   -ExpectNotInLog   pieces of text it must not contain
 #   -UninstallArgs    extra switches for the uninstaller, like /DELETEDATA=1
 #   -UninstallIn      pieces of text the uninstall log has to contain (-UninstallNotIn: must not contain)
+#   -PreCreate        files to put in the install folder first (paths inside it), like a folder that is not empty
 function Test-Case {
     param(
         [string]$Name,
@@ -79,6 +80,7 @@ function Test-Case {
         [string[]]$UninstallArgs = @(),
         [string[]]$UninstallIn = @(),
         [string[]]$UninstallNotIn = @(),
+        [string[]]$PreCreate = @(),
         [switch]$StopShortcut,
         [string]$DryRunSwitch = '/DRYRUN'
     )
@@ -86,6 +88,11 @@ function Test-Case {
     Write-Host "=== $Name"
     $problemsBefore = $script:problems.Count
     $dir = Join-Path $work $Name
+    foreach ($relative in $PreCreate) {
+        $path = Join-Path $dir $relative
+        New-Item -ItemType Directory -Path (Split-Path -Parent $path) -Force | Out-Null
+        Set-Content -Path $path -Value 'test'
+    }
     $setupArgs = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', $DryRunSwitch, '/SHOWFILES', "/DIR=`"$dir`"") + $InstallArgs
     $r = Invoke-Logged $Installer $setupArgs 'install'
     Check ($r.ExitCode -eq $ExpectExit) "the installer ended with exit code $ExpectExit (it was $($r.ExitCode))"
@@ -124,6 +131,13 @@ function Test-Case {
 # --- the folder way ---------------------------------------------------------
 Test-Case -Name 'folder' -InstallArgs @('/METHOD=folder', '/PORT=5690') `
     -ExpectInLog @('Method: folder\s+Port: 5690', 'SHASUMS256\.txt', 'npm\.cmd" install n8n@2 ', 'would write .*\\\.npmrc', 'would write .*\\start-n8n\.cmd')
+
+# A folder that only holds the data an earlier uninstall kept is fine to install into; a folder with anything else in it
+# needs a yes from the person (a silent install answers no and stops).
+Test-Case -Name 'folder-with-kept-data' -InstallArgs @('/METHOD=folder') -PreCreate @('.n8n\config') `
+    -ExpectNotInLog @('already has other files')
+Test-Case -Name 'folder-with-other-files' -InstallArgs @('/METHOD=folder') -PreCreate @('my notes.txt', '.n8n\config') -ExpectExit 1 `
+    -ExpectInLog @('already has other files')
 
 # --- the user-account way, with a Node.js that fits and one that does not ---
 Test-Case -Name 'global' -InstallArgs @('/METHOD=global', '/FAKENODE=22.11.0') `
