@@ -58,11 +58,10 @@ if !ERRORLEVEL! NEQ 0 (
     echo  [✗] Node.js is not detected
     echo.
     echo      Please install Node.js before continuing.
-    echo      Download: https://nodejs.org/en/download
+    echo      Download: https://nodejs.org/
     echo.
-    echo      Recommended: Node.js 24.x LTS
-    echo      Supported:   Node.js 24.x
-    echo      Pick version 24 on the download page. Newer versions are not supported yet.
+    echo      Recommended: Node.js 22.x LTS
+    echo      Supported:   Node.js 20.19+ or 22.x LTS
     echo.
     pause
     exit /b 1
@@ -76,14 +75,15 @@ for /f "tokens=1,2 delims=." %%a in ("%NODE_VERSION_NUMBER%") do (
 )
 if not defined NODE_MINOR set "NODE_MINOR=0"
 
-REM Node.js 24.x LTS is the only supported line. n8n 2.36 and newer declare an
-REM engines.node of 24.0.0 or newer and refuse to start on older Node, and their
-REM isolated-vm dependency ships prebuilt binaries for Node 24 and 26 only, so
-REM Node 22 falls back to a compile that fails without Visual Studio build tools.
-REM Node 25 has no prebuilt binaries and Node 26 is outside the range n8n
-REM documents. Node 24 ships npm 11, which is the pairing this installer targets.
+REM Node.js 22.x LTS is the ceiling. It ships npm 10, which is the pairing this
+REM installer targets. Newer Node ships newer npm, and npm 12 blocks dependency
+REM install scripts, which leaves sqlite3 without its native binary.
 set "NODE_SUPPORTED=NO"
-if "%NODE_MAJOR%"=="24" set "NODE_SUPPORTED=YES"
+if "%NODE_MAJOR%"=="20" (
+    if %NODE_MINOR% GEQ 19 set "NODE_SUPPORTED=YES"
+) else if "%NODE_MAJOR%"=="22" (
+    set "NODE_SUPPORTED=YES"
+)
 
 if "%NODE_SUPPORTED%"=="YES" (
     echo  [✓] Node.js %NODE_VERSION% - Supported by n8n 2.x
@@ -147,20 +147,20 @@ if "%NODE_SUPPORTED%"=="NO" (
     if "%DOCKER_AVAILABLE%"=="YES" (
         echo.
         echo  [^^!] Native npm installations are disabled with Node.js %NODE_VERSION%
-        echo      Supported: Node.js 24.x only, because n8n 2.36 and newer need it
+        echo      Supported: Node.js 20.19+ or 22.x LTS
         echo      You can still use the Docker installation option.
     ) else if "!WSL_AVAILABLE!"=="YES" (
         echo.
         echo  [^^!] Native npm installations are disabled with Node.js %NODE_VERSION%
-        echo      Supported: Node.js 24.x only, because n8n 2.36 and newer need it
+        echo      Supported: Node.js 20.19+ or 22.x LTS
         echo      You can still use the WSL2 installation option.
     ) else (
         echo.
         echo  [✗] No supported installation method is available
-        echo      Native installs require Node.js 24.x.
+        echo      Native installs require Node.js 20.19+ or 22.x LTS.
         echo      Docker Desktop is not available or not running.
         echo.
-        echo      Install Node.js 24 LTS or start Docker Desktop, then rerun.
+        echo      Install Node.js 22 LTS or start Docker Desktop, then rerun.
         echo.
         pause
         exit /b 1
@@ -172,29 +172,32 @@ echo.
 echo  Checking for updates...
 echo.
 
-REM Report the Node.js status. 24.x is the only supported line.
+REM Get latest Node.js LTS version (approximate check)
 if "%NODE_SUPPORTED%"=="YES" (
-    echo  [✓] Node.js %NODE_VERSION% - Supported LTS
+    if "%NODE_MAJOR%"=="22" (
+        echo  [✓] Node.js %NODE_VERSION% - Supported LTS
+    ) else (
+        echo  [^^!] Node.js %NODE_VERSION% - Supported; Node.js 22.x LTS available
+        echo      Visit: https://nodejs.org/
+    )
 ) else (
     echo  [^^!] Node.js %NODE_VERSION% - Native npm installs unavailable
-    echo      Recommended: Node.js 24.x LTS
-    echo      Visit: https://nodejs.org/en/download
-    echo      Pick version 24 there. Newer versions are not supported yet.
+    echo      Recommended: Node.js 22.x LTS
+    echo      Visit: https://nodejs.org/
 )
 
-REM npm 11 ships with Node.js 24 and is the pairing this installer targets, so any
-REM npm 11 or older is left alone. npm 12 or newer blocks dependency install
-REM scripts by default, which leaves sqlite3 without its native binary and stops
-REM n8n from starting. Only that case offers to go back to the newest npm 11.
+REM Get highest supported npm version. npm is capped at 10.x to match the npm
+REM that ships with Node.js 22 LTS. npm 12 blocks dependency install scripts,
+REM which leaves sqlite3 without its native binary and stops n8n from starting.
 echo.
 if "%NODE_SUPPORTED%"=="YES" (
-    set "NPM_MAJOR=0"
-    for /f "tokens=1 delims=." %%a in ("!NPM_VERSION!") do set "NPM_MAJOR=%%a"
-    if !NPM_MAJOR! GEQ 12 (
-        for /f "tokens=*" %%i in ('npm view npm@next-11 version 2^>nul') do set NPM_MAX=%%i
-        echo  [^^!] npm !NPM_VERSION! blocks the install scripts n8n needs
-        if defined NPM_MAX (
-            echo      Supported: npm 11.x
+    for /f "tokens=*" %%i in ('npm view npm@next-10 version 2^>nul') do set NPM_MAX=%%i
+
+    if defined NPM_MAX (
+        if "!NPM_VERSION!"=="!NPM_MAX!" (
+            echo  [✓] npm !NPM_VERSION! - Highest supported version
+        ) else (
+            echo  [^^!] npm !NPM_VERSION! - Supported version available: !NPM_MAX!
             echo.
             set /p "UPDATE_NPM=      Install npm !NPM_MAX! now? (Y/N): "
             if /i "!UPDATE_NPM!"=="Y" (
@@ -211,11 +214,9 @@ if "%NODE_SUPPORTED%"=="YES" (
                     echo      [✗] npm update failed, continuing
                 )
             )
-        ) else (
-            echo      Supported: npm 11.x ^(version lookup unavailable, continuing^)
         )
     ) else (
-        echo  [✓] npm !NPM_VERSION! - Supported
+        echo  [✓] npm %NPM_VERSION% - version check unavailable, continuing
     )
 ) else (
     echo  [^^!] npm update check skipped because native installs are disabled
@@ -325,9 +326,9 @@ if "!WSL_AVAILABLE!"=="YES" (
 if "%N8N_TYPE%"=="1" (
     if not "%NODE_SUPPORTED%"=="YES" (
         echo.
-        echo  [✗] Global installation requires Node.js 24.x.
+        echo  [✗] Global installation requires Node.js 20.19+ or 22.x LTS.
         echo      Detected: %NODE_VERSION%
-        echo      Install Node.js 24 LTS or choose Docker if available.
+        echo      Install Node.js 22 LTS or choose Docker if available.
         echo.
         pause
         goto CUSTOM_INSTALL
@@ -392,9 +393,9 @@ if "%N8N_TYPE%"=="1" (
 ) else if "%N8N_TYPE%"=="2" (
     if not "%NODE_SUPPORTED%"=="YES" (
         echo.
-        echo  [✗] Folder-specific installation requires Node.js 24.x.
+        echo  [✗] Folder-specific installation requires Node.js 20.19+ or 22.x LTS.
         echo      Detected: %NODE_VERSION%
-        echo      Install Node.js 24 LTS or choose Docker if available.
+        echo      Install Node.js 22 LTS or choose Docker if available.
         echo.
         pause
         goto CUSTOM_INSTALL
@@ -967,8 +968,7 @@ echo.
 REM n8n@2 keeps the install on the 2.x line. n8n 3.0 drops npm installs, so an
 REM unpinned install could one day resolve to a release this installer cannot run.
 REM --allow-scripts is required on npm 12+, which blocks dependency install
-REM scripts by default. Without it sqlite3 never gets its native binary. A global
-REM install is the one place npm accepts this flag. npm 11 and older do not need it.
+REM scripts by default. Without it sqlite3 never builds. Older npm ignores it.
 REM --loglevel=error hides npm's deprecation warning spam but still shows errors.
 call npm install -g n8n@2 --allow-scripts=sqlite3 --loglevel=error --no-fund --no-audit
 echo.
@@ -996,19 +996,8 @@ if not exist "!N8N_INSTALL_PATH!\" (
     exit /b 1
 )
 cd /d "!N8N_INSTALL_PATH!"
-REM sqlite3 needs its install script to fetch its native binary, and npm 12 blocks
-REM dependency install scripts by default. In a project install the allowance has to
-REM live in a project .npmrc: npm 11.19 and newer reject --allow-scripts on the
-REM command line there. Older npm ignores the entry. The launcher's update command
-REM runs in this folder and reads the same file.
-findstr /b /c:"allow-scripts=" "!N8N_INSTALL_PATH!\.npmrc" >nul 2>&1
-if !ERRORLEVEL! NEQ 0 (
-    (
-        echo.
-        echo allow-scripts=sqlite3
-    ) >> "!N8N_INSTALL_PATH!\.npmrc"
-)
-call npm install n8n@2 --loglevel=error --no-fund --no-audit
+REM n8n@2 keeps the install on the 2.x line, see the note in :INSTALL_GLOBAL.
+call npm install n8n@2 --allow-scripts=sqlite3 --loglevel=error --no-fund --no-audit
 echo.
 echo  Verifying installation...
 if not exist "!N8N_INSTALL_PATH!\node_modules\n8n" (
@@ -1165,7 +1154,7 @@ if "!N8N_INSTALL_TYPE!"=="DOCKER" (
                 echo     if /i "^^!DO_UPDATE^^!"=="Y" ^(
                 echo         echo.
                 echo         echo   Updating n8n...
-                echo         npm install n8n@2 --loglevel=error --no-fund --no-audit
+                echo         npm install n8n@2 --allow-scripts=sqlite3 --loglevel=error --no-fund --no-audit
                 echo         echo.
                 echo         echo   [OK] Update complete
                 echo         echo.
@@ -1637,7 +1626,7 @@ if not defined WSLP_WSLUSER (
     goto ASK_WSL_DISTRO
 )
 
-REM Node version rule mirrors the Windows gate exactly: 24.x only
+REM Node version rule mirrors the Windows gate exactly: 20.19+ or 22.x
 set "WSL_NODE_OK=NO"
 set "WSL_NODE_MAJOR="
 set "WSL_NODE_MINOR="
@@ -1658,7 +1647,11 @@ if not "!WSLP_NODEVER!"=="none" (
     )
 )
 if not defined WSL_NODE_MINOR set "WSL_NODE_MINOR=0"
-if "!WSL_NODE_MAJOR!"=="24" set "WSL_NODE_OK=YES"
+if "!WSL_NODE_MAJOR!"=="20" (
+    if !WSL_NODE_MINOR! GEQ 19 set "WSL_NODE_OK=YES"
+) else if "!WSL_NODE_MAJOR!"=="22" (
+    set "WSL_NODE_OK=YES"
+)
 
 REM Ownership decides root vs user install. A Node managed under the user's home
 REM (nvm) must never be written to as root, or the user's Node tree ends up
@@ -1691,12 +1684,11 @@ if /i "!WSLP_OSID!"=="arch" set "WSL_PKG_OK=PAC"
 if /i "!WSLP_OSID!"=="opensuse-leap" set "WSL_PKG_OK=ZYP"
 if /i "!WSLP_OSID!"=="opensuse-tumbleweed" set "WSL_PKG_OK=ZYP"
 
-REM Only NodeSource pins 24.x. apk, pacman and zypper ship whatever Node their
-REM repository carries, which this installer rejects unless it is 24, so do not
-REM promise 24 LTS there.
-set "WSL_PKG_N24=NO"
-if "!WSL_PKG_OK!"=="DEB" set "WSL_PKG_N24=YES"
-if "!WSL_PKG_OK!"=="RPM" set "WSL_PKG_N24=YES"
+REM Only NodeSource pins 22.x. apk, pacman and zypper ship current Node, which
+REM this installer would then reject, so do not promise 22 LTS there.
+set "WSL_PKG_N22=NO"
+if "!WSL_PKG_OK!"=="DEB" set "WSL_PKG_N22=YES"
+if "!WSL_PKG_OK!"=="RPM" set "WSL_PKG_N22=YES"
 
 set "WSL_NODE_OFFER=NO"
 if "!WSL_USE_ROOT!"=="YES" if not "!WSL_PKG_OK!"=="NO" set "WSL_NODE_OFFER=YES"
@@ -1724,7 +1716,7 @@ if "!WSLP_NODEVER!"=="none" (
     echo   npm found:      !WSLP_NPMVER!
     echo   Real path:      !WSLP_NODEPATH!
 )
-echo   n8n requires:   Node.js 24.x LTS
+echo   n8n requires:   Node.js 20.19+ or 22.x LTS
 if "!WSL_USE_ROOT!"=="YES" (
     echo   Managed by:     the system
 ) else (
@@ -1739,8 +1731,8 @@ echo.
 echo  ────────────────────────────────────────
 echo.
 if "!WSL_USE_ROOT!"=="YES" (
-    if "!WSL_PKG_N24!"=="YES" (
-        echo   1. Install Node.js 24 LTS inside !WSL_DISTRO!   [recommended]
+    if "!WSL_PKG_N22!"=="YES" (
+        echo   1. Install Node.js 22 LTS inside !WSL_DISTRO!   [recommended]
         echo      Installs system-wide as root from the official NodeSource
         echo      repository. Nothing else is changed.
     ) else if "!WSL_PKG_OK!"=="NO" (
@@ -1749,12 +1741,12 @@ if "!WSL_USE_ROOT!"=="YES" (
         echo      installer has no Node.js provisioning steps for.
     ) else (
         echo   1. Install Node.js from the !WSL_DISTRO! package manager
-        echo      This distribution does not ship a Node.js 24 LTS package, so
+        echo      This distribution does not ship a Node.js 22 LTS package, so
         echo      you may get a newer version. It is re-checked afterwards and
         echo      you will be told if it is still unsupported.
     )
 ) else if "!WSL_NVM_OK!"=="YES" (
-    echo   1. Install Node.js 24 LTS via nvm               [recommended]
+    echo   1. Install Node.js 22 LTS via nvm               [recommended]
     echo      Runs as !WSLP_WSLUSER!, not root. Your other versions are kept.
 ) else if "!WSL_NVM!"=="YES" (
     echo   1. Not offered for this setup
@@ -1793,7 +1785,7 @@ if not "!WSL_NODE_OFFER!"=="YES" (
 
 :WSL_INSTALL_NODE
 echo.
-echo  Installing Node.js 24 LTS inside !WSL_DISTRO!...
+echo  Installing Node.js 22 LTS inside !WSL_DISTRO!...
 echo  This may take a few minutes.
 echo.
 if "!WSL_USE_ROOT!"=="NO" goto WSL_INSTALL_NODE_NVM
@@ -1807,19 +1799,19 @@ REM resolve versions. nvm layout is <root>/versions/node/<ver>/bin/node.
 REM The default alias is deliberately left alone - the launcher pins the full
 REM PATH, so repointing the user's global default Node would be a needless
 REM change to their environment.
-wsl -d !WSL_DISTRO! --exec bash -c "NR=$(dirname $(dirname $(dirname $(dirname $(dirname !WSLP_NODEPATH!))))); if [ -s $NR/nvm.sh ]; then NRFOUND=1; else NR=$HOME/.nvm; fi; if [ -s $NR/nvm.sh ]; then . $NR/nvm.sh; nvm install 24; else echo NVM_SCRIPT_NOT_FOUND; exit 1; fi"
-REM nvm only adjusts PATH in interactive shells, so ask it where 24 landed
+wsl -d !WSL_DISTRO! --exec bash -c "NR=$(dirname $(dirname $(dirname $(dirname $(dirname !WSLP_NODEPATH!))))); if [ -s $NR/nvm.sh ]; then NRFOUND=1; else NR=$HOME/.nvm; fi; if [ -s $NR/nvm.sh ]; then . $NR/nvm.sh; nvm install 22; else echo NVM_SCRIPT_NOT_FOUND; exit 1; fi"
+REM nvm only adjusts PATH in interactive shells, so ask it where 22 landed
 REM instead of hoping a later 'command -v node' picks it up.
 set "WSL_NEWBIN="
-for /f "usebackq tokens=*" %%P in (`wsl -d !WSL_DISTRO! --exec bash -c "NR=$(dirname $(dirname $(dirname $(dirname $(dirname !WSLP_NODEPATH!))))); if [ -s $NR/nvm.sh ]; then NRFOUND=1; else NR=$HOME/.nvm; fi; . $NR/nvm.sh >/dev/null 2>&1; NW=$(nvm which 24 2>/dev/null); NW=${NW:-none}; if [ $NW = none ]; then echo none; else dirname $NW; fi" ^<nul`) do set "WSL_NEWBIN=%%P"
+for /f "usebackq tokens=*" %%P in (`wsl -d !WSL_DISTRO! --exec bash -c "NR=$(dirname $(dirname $(dirname $(dirname $(dirname !WSLP_NODEPATH!))))); if [ -s $NR/nvm.sh ]; then NRFOUND=1; else NR=$HOME/.nvm; fi; . $NR/nvm.sh >/dev/null 2>&1; NW=$(nvm which 22 2>/dev/null); NW=${NW:-none}; if [ $NW = none ]; then echo none; else dirname $NW; fi" ^<nul`) do set "WSL_NEWBIN=%%P"
 if defined WSL_NEWBIN if not "!WSL_NEWBIN!"=="none" set "WSL_PATH_HINT=!WSL_NEWBIN!"
 goto WSL_NODE_RECHECK
 
 :WSL_INSTALL_NODE_PKG
 if "!WSL_PKG_OK!"=="DEB" (
-    wsl -d !WSL_DISTRO! -u root --exec sh -c "export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y -qq curl ca-certificates python3 make g++ && curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && apt-get install -y -qq nodejs"
+    wsl -d !WSL_DISTRO! -u root --exec sh -c "export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y -qq curl ca-certificates python3 make g++ && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y -qq nodejs"
 ) else if "!WSL_PKG_OK!"=="RPM" (
-    wsl -d !WSL_DISTRO! -u root --exec sh -c "curl -fsSL https://rpm.nodesource.com/setup_24.x | bash - && dnf install -y -q nodejs gcc-c++ make python3"
+    wsl -d !WSL_DISTRO! -u root --exec sh -c "curl -fsSL https://rpm.nodesource.com/setup_22.x | bash - && dnf install -y -q nodejs gcc-c++ make python3"
 ) else if "!WSL_PKG_OK!"=="APK" (
     wsl -d !WSL_DISTRO! -u root --exec sh -c "apk add --no-cache nodejs npm python3 make g++ curl ca-certificates"
 ) else if "!WSL_PKG_OK!"=="PAC" (
