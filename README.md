@@ -19,7 +19,7 @@ A free, unofficial setup program that installs [n8n](https://n8n.io) on Windows.
 
 ## Download
 
-**[Download n8n-Installer.exe](https://github.com/kenneth-leander/n8n-windows-community-installer/raw/main/n8n-Installer.exe)** (about 3 MB, for 64-bit Windows 10 version 1809 or newer, or Windows 11). Open it and follow the steps. You do not need administrator rights.
+**[Download n8n-Installer.exe](https://github.com/kenneth-leander/n8n-windows-community-installer/raw/main/n8n-Installer.exe)** (about 2.5 MB, for 64-bit Windows 10 version 1809 or newer, or Windows 11). Open it and follow the steps. You do not need administrator rights.
 
 The installer is not signed yet, so Windows shows **Windows protected your PC** the first time. Click **More info**, then **Run anyway**. Free code signing for open source projects is planned (see the [roadmap](#roadmap)).
 
