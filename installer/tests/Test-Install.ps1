@@ -55,15 +55,57 @@ function Stop-Here([string]$why) {
     exit 1
 }
 
+# What a program is busy with: the programs it started (with the processor time they used so far, so a busy one can
+# be told from one that is stuck) and the last line of the installer's own log.
+function Show-Activity([int]$rootId, [double]$elapsedSec) {
+    $all = @(Get-CimInstance Win32_Process)
+    $family = New-Object 'System.Collections.Generic.HashSet[int]'
+    [void]$family.Add($rootId)
+    do {
+        $grew = $false
+        foreach ($proc in $all) {
+            if ($family.Contains([int]$proc.ParentProcessId) -and $family.Add([int]$proc.ProcessId)) { $grew = $true }
+        }
+    } while ($grew)
+    Write-Host ("  [{0:n0} min] still running; programs it started:" -f ($elapsedSec / 60))
+    foreach ($proc in $all) {
+        if ($proc.ProcessId -eq $rootId -or -not $family.Contains([int]$proc.ProcessId)) { continue }
+        $cpu = ''
+        try { $cpu = '{0:n1}s' -f (Get-Process -Id $proc.ProcessId -ErrorAction Stop).CPU } catch { }
+        $line = "$($proc.CommandLine)"
+        if ($line.Length -gt 150) { $line = $line.Substring(0, 150) + '...' }
+        Write-Host ('    {0,6} (from {1,6})  cpu {2,8}  {3}' -f $proc.ProcessId, $proc.ParentProcessId, $cpu, $line)
+    }
+    $latest = $null
+    if (Test-Path $logDir) {
+        $latest = Get-ChildItem $logDir -Filter 'install-*.log' | Sort-Object LastWriteTime | Select-Object -Last 1
+    }
+    if ($latest) {
+        $tail = @(Get-Content -Path $latest.FullName -Tail 2 -ErrorAction SilentlyContinue) -join ' | '
+        Write-Host "    last lines of $($latest.Name): $tail"
+    }
+}
+
 # Starts a program and waits for it, but not for ever: a program that hangs is stopped, so the logs get printed
-# instead of the whole run timing out without a word. Returns its exit code (124 when it had to be stopped).
+# instead of the whole run timing out without a word. Every minute it says what the program is busy with.
+# Returns its exit code (124 when it had to be stopped).
 function Invoke-Timed([string]$file, [string[]]$arguments, [int]$seconds) {
     $p = Start-Process -FilePath $file -ArgumentList $arguments -PassThru
-    if (-not $p.WaitForExit($seconds * 1000)) {
-        Write-Host "::error::$(Split-Path -Leaf $file) did not finish within $seconds seconds. It is stopped now."
-        & taskkill.exe /PID $p.Id /T /F | Out-Null
-        return 124
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $nextReport = 60
+    while (-not $p.WaitForExit(5000)) {
+        if ($clock.Elapsed.TotalSeconds -ge $seconds) {
+            Write-Host "::error::$(Split-Path -Leaf $file) did not finish within $seconds seconds. It is stopped now."
+            Show-Activity $p.Id $clock.Elapsed.TotalSeconds
+            & taskkill.exe /PID $p.Id /T /F | Out-Null
+            return 124
+        }
+        if ($clock.Elapsed.TotalSeconds -ge $nextReport) {
+            Show-Activity $p.Id $clock.Elapsed.TotalSeconds
+            $nextReport += 60
+        }
     }
+    Write-Host ("  {0} finished after {1:n0} seconds" -f (Split-Path -Leaf $file), $clock.Elapsed.TotalSeconds)
     return $p.ExitCode
 }
 
