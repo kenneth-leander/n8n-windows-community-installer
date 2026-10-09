@@ -622,10 +622,11 @@ end;
 // nvm looks Node.js versions up in a list that it downloads from nodejs.org, and it tells curl to say nothing when that
 // download fails, so all it then says is  Version '22' not found  (exit code 3), as if there were no such version.
 // This asks the same question again with the messages switched on. It prints NETTOOL (curl, wget or none), NETCODE
-// (0 = the list can be downloaded) and NETSAID (what the tool said when it could not).
+// (0 = the list can be downloaded) and NETSAID (what the tool said when it could not). LC_ALL=C keeps what the tool says
+// to plain English letters: wget would otherwise put curly quotes (UTF-8) around the host name, which Windows may show wrongly.
 function WslNodejsOrgScript: String;
 begin
-  Result := 'set -f; ' + WslScriptStart +
+  Result := 'set -f; ' + WslScriptStart + 'LC_ALL=C; export LC_ALL; ' +
     'if command -v curl >/dev/null 2>&1; then T=curl; R=$(curl -fsS -L --max-time 20 -o /dev/null https://nodejs.org/dist/index.tab 2>&1); C=$?; ' +
     'elif command -v wget >/dev/null 2>&1; then T=wget; R=$(wget -nv -T 20 -t 1 -O /dev/null https://nodejs.org/dist/index.tab 2>&1); C=$?; ' +
     'else T=none; R=; C=127; fi; ' +
