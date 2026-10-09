@@ -7,6 +7,10 @@ begin
   Result := 'inside ' + Cfg.WslDistro;
 end;
 
+procedure SetWslVars;
+begin
+end;
+
 procedure SaveWslState;
 begin
 end;

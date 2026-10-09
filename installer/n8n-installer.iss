@@ -100,7 +100,7 @@ Source: "templates\*"; Flags: dontcopy
 [Icons]
 Name: "{autoprograms}\{code:GetGroupName}\Start n8n"; Filename: "{app}\start-n8n.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\n8n.ico"; Comment: "Starts n8n and opens it in your web browser"
 Name: "{autoprograms}\{code:GetGroupName}\Open n8n in my web browser"; Filename: "{code:OpenAddress}"; IconFilename: "{app}\n8n.ico"
-Name: "{autoprograms}\{code:GetGroupName}\Stop n8n"; Filename: "{app}\stop-n8n.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\n8n.ico"; Check: IsDockerInstall
+Name: "{autoprograms}\{code:GetGroupName}\Stop n8n"; Filename: "{app}\stop-n8n.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\n8n.ico"; Check: HasStopScript
 Name: "{autoprograms}\{code:GetGroupName}\The n8n folder"; Filename: "{app}"
 Name: "{autoprograms}\{code:GetGroupName}\Read me"; Filename: "{app}\README.txt"
 Name: "{autoprograms}\{code:GetGroupName}\Uninstall n8n"; Filename: "{uninstallexe}"

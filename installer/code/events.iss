@@ -369,9 +369,10 @@ begin
   Result := Cfg.Desktop;
 end;
 
-function IsDockerInstall: Boolean;
+// Docker and Linux (WSL2) keep n8n running outside the window that started it, so they get a Stop n8n shortcut.
+function HasStopScript: Boolean;
 begin
-  Result := Cfg.Method = MethodDocker;
+  Result := (Cfg.Method = MethodDocker) or (Cfg.Method = MethodWsl);
 end;
 
 function OpenAddress(Param: String): String;

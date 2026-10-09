@@ -79,11 +79,14 @@ function Test-Case {
     Write-Host "=== $Name"
     $problemsBefore = $script:problems.Count
     $dir = Join-Path $work $Name
-    $setupArgs = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', $DryRunSwitch, "/DIR=`"$dir`"") + $InstallArgs
+    $setupArgs = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', $DryRunSwitch, '/SHOWFILES', "/DIR=`"$dir`"") + $InstallArgs
     $r = Invoke-Logged $Installer $setupArgs 'install'
     Check ($r.ExitCode -eq $ExpectExit) "the installer ended with exit code $ExpectExit (it was $($r.ExitCode))"
     foreach ($pattern in $ExpectInLog) { Check ($r.Log -match $pattern) "the log says: $pattern" }
     foreach ($pattern in $ExpectNotInLog) { Check ($r.Log -notmatch $pattern) "the log does not say: $pattern" }
+    # The files the installer would write (start script, readme, ...) have every @@MARKER@@ of their template filled in.
+    Check ($r.Log -notmatch '@@[A-Z0-9_]+@@') 'no @@MARKER@@ is left in the files it would write'
+    if ($ExpectExit -eq 0) { Check ($r.Log -match 'start-n8n\.cmd would contain') 'the start script is written' }
     if ($script:problems.Count -gt $problemsBefore -and $r.Log) {
         Write-Host '--- install log ---'
         Write-Host $r.Log

@@ -150,10 +150,11 @@ function Start-N8n {
 }
 
 function Stop-N8n($proc) {
-    if ($Method -eq 'docker') {
+    # Docker and Linux (WSL2) keep n8n running outside the window that started it, so they have a stop script.
+    if ($Method -eq 'docker' -or $Method -eq 'wsl') {
         $null = Start-Process -FilePath $env:ComSpec -ArgumentList '/c', "`"$Dir\stop-n8n.cmd`"" -Wait -WindowStyle Hidden
     }
-    elseif ($proc) {
+    if ($proc -and -not $proc.HasExited) {
         & taskkill.exe /PID $proc.Id /T /F | Out-Null
     }
     $null = Wait-Gone 40

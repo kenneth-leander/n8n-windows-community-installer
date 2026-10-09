@@ -10,8 +10,10 @@ var
   GHadPrivateNode: Boolean;   // the folder already held its own Node.js before this run
   GDockerImage: String;       // the image that was really pulled, like docker.n8n.io/n8nio/n8n:2.42.5
 
-// Provided by the WSL module: where the data of a WSL install shows up in Windows, for display.
+// Provided by the WSL module: where the data of a WSL install shows up in Windows, for display, and the values
+// that only its launchers and readme use.
 function WslDataDisplay: String; forward;
+procedure SetWslVars; forward;
 
 function AppDir: String;
 begin
@@ -113,11 +115,19 @@ begin
     Result := ReplaceAll(Result, '@@' + GKeys[I] + '@@', GValues[I]);
 end;
 
+// Test mode: /SHOWFILES puts the text of every file that would be written into the log, so a test can read it.
+procedure ShowFileInLog(const Name, Text: String);
+begin
+  if GDryRun and SwitchGiven('SHOWFILES') then
+    LogLine('--- ' + Name + ' would contain:' + #13#10 + Text + #13#10 + '--- end of ' + Name);
+end;
+
 procedure WriteFromTemplate(const Template, Target: String);
 var
   Text: String;
 begin
   Text := Fill(LoadTemplate(Template));
+  ShowFileInLog(ExtractFileName(Target), Text);
   if not GDryRun then
     ForceDirectories(ExtractFilePath(Target));
   SaveAsciiFile(Target, Text);
@@ -144,6 +154,7 @@ begin
   if GDryRun then
   begin
     LogLine('(dry run) would write the readme');
+    ShowFileInLog('README.txt', Text);
     Exit;
   end;
   SaveStringsToUTF8File(AppDir + '\README.txt', Lines, False);
@@ -194,6 +205,8 @@ begin
     SetVar('SECURE_COOKIE', 'rem Other devices open n8n over plain http, so the login cookie cannot be marked secure.' + #13#10 + 'set "N8N_SECURE_COOKIE=false"')
   else
     SetVar('SECURE_COOKIE', 'rem n8n answers on this computer only (see N8N_LISTEN_ADDRESS above).');
+  if Cfg.Method = MethodWsl then
+    SetWslVars;
 end;
 
 // ---------------------------------------------------------------------------
