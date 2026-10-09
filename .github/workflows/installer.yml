@@ -1,0 +1,176 @@
+name: Installer
+
+# Builds the Windows installer (installer/n8n-installer.iss) with Inno Setup and tests it on real
+# Windows computers. Docker and WSL2 installs cannot run on GitHub's computers (no Linux containers,
+# no WSL2), so those two are tested by hand: see installer/README.md.
+
+on:
+  push:
+    branches: [main, gui-installer]
+    paths:
+      - 'installer/**'
+      - '.github/workflows/installer.yml'
+  pull_request:
+    paths:
+      - 'installer/**'
+      - '.github/workflows/installer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # The Inno Setup compiler is fetched from NuGet and checked against this exact hash, so a build
+  # always uses the same compiler bytes. To move to a newer Inno Setup, change both lines together.
+  INNO_VERSION: '6.7.3'
+  INNO_SHA256: 'f780898e402ff80612cc8d9fcb8c6e02932bd1cb4c900ffdaa31f9341cfb49f4'
+
+jobs:
+  build:
+    name: Build the installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the scripts and templates
+        shell: pwsh
+        run: |
+          $bad = 0
+          # PowerShell scripts must parse.
+          Get-ChildItem installer -Recurse -Filter *.ps1 | ForEach-Object {
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errors)
+            if ($errors) { $errors | ForEach-Object { Write-Host "::error file=$($_.Extent.File)::$($_.Message)" }; $bad++ }
+          }
+          # Launchers and helper scripts are plain ASCII, so Windows reads them the same on every computer.
+          Get-ChildItem installer/templates, installer/scripts -File | ForEach-Object {
+            if ([IO.File]::ReadAllBytes($_.FullName) | Where-Object { $_ -gt 127 } | Select-Object -First 1) {
+              Write-Host "::error file=$($_.FullName)::contains characters outside plain ASCII"; $bad++
+            }
+          }
+          if ($bad) { exit 1 }
+
+      - name: Get the Inno Setup compiler
+        shell: pwsh
+        run: |
+          $package = Join-Path $env:RUNNER_TEMP 'innosetup.zip'
+          Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/Tools.InnoSetup/$env:INNO_VERSION" -OutFile $package
+          $hash = (Get-FileHash $package -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne $env:INNO_SHA256) { throw "Inno Setup package has hash $hash, expected $env:INNO_SHA256" }
+          Expand-Archive -Path $package -DestinationPath (Join-Path $env:RUNNER_TEMP 'innosetup')
+
+      - name: Build n8n-Installer.exe
+        shell: pwsh
+        run: |
+          $iss = Get-Content installer/n8n-installer.iss -Raw
+          $base = [regex]::Match($iss, '#define AppVersion "([0-9]+\.[0-9]+\.[0-9]+)').Groups[1].Value
+          if (-not $base) { throw 'Could not read the version from n8n-installer.iss' }
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          } else {
+            $version = "$base-dev.$env:GITHUB_RUN_NUMBER"
+          }
+          $numeric = "$base.$env:GITHUB_RUN_NUMBER"
+          Write-Host "Building version $version ($numeric)"
+          & (Join-Path $env:RUNNER_TEMP 'innosetup\tools\ISCC.exe') "/DAppVersion=$version" "/DAppVersionNumeric=$numeric" installer\n8n-installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
+          $exe = 'installer\dist\n8n-Installer.exe'
+          $sum = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          "$sum  n8n-Installer.exe" | Set-Content -Path installer\dist\SHA256SUMS.txt -Encoding ascii
+          Write-Host "SHA-256 $sum"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: n8n-installer
+          path: |
+            installer/dist/n8n-Installer.exe
+            installer/dist/SHA256SUMS.txt
+          if-no-files-found: error
+
+  test-folder:
+    name: Test "in a folder of its own" (Windows)
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: n8n-installer
+          path: dist
+
+      - name: Helper scripts under Windows PowerShell 5.1
+        shell: pwsh
+        run: |
+          foreach ($name in 'docker-probe', 'wsl-list') {
+            $out = & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "installer\scripts\$name.ps1"
+            Write-Host "$name printed: [$out]"
+            if ($LASTEXITCODE -ne 0) { throw "$name.ps1 exited with $LASTEXITCODE" }
+            if ($name -eq 'docker-probe' -and "$out" -notmatch '^(ready|windows|stopped|missing)(\|.*)?$') { throw "docker-probe.ps1 printed something unexpected" }
+          }
+
+      - name: Install, start, update and uninstall
+        shell: pwsh
+        run: ./installer/tests/Test-Install.ps1 -Installer dist\n8n-Installer.exe -Method folder -Dir C:\n8n-ci-folder
+
+      - name: Collect logs
+        if: always()
+        shell: pwsh
+        run: |
+          $to = Join-Path $env:RUNNER_TEMP 'ci-logs'
+          New-Item -ItemType Directory -Force -Path $to | Out-Null
+          Copy-Item "$env:LOCALAPPDATA\n8n-installer\logs\*" $to -ErrorAction SilentlyContinue
+          Copy-Item "$env:RUNNER_TEMP\setup-*.log", "$env:RUNNER_TEMP\n8n-*.log" $to -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: logs-test-folder
+          path: ${{ runner.temp }}/ci-logs
+          if-no-files-found: ignore
+
+  test-global:
+    name: Test "for this user account" (Windows, Node.js 22)
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          name: n8n-installer
+          path: dist
+
+      - name: Install, start, update and uninstall
+        shell: pwsh
+        run: ./installer/tests/Test-Install.ps1 -Installer dist\n8n-Installer.exe -Method global -Dir C:\n8n-ci-global -Port 5689
+
+      - name: Collect logs
+        if: always()
+        shell: pwsh
+        run: |
+          $to = Join-Path $env:RUNNER_TEMP 'ci-logs'
+          New-Item -ItemType Directory -Force -Path $to | Out-Null
+          Copy-Item "$env:LOCALAPPDATA\n8n-installer\logs\*" $to -ErrorAction SilentlyContinue
+          Copy-Item "$env:RUNNER_TEMP\setup-*.log", "$env:RUNNER_TEMP\n8n-*.log" $to -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: logs-test-global
+          path: ${{ runner.temp }}/ci-logs
+          if-no-files-found: ignore
+
+  test-docker-tag:
+    name: Test the Docker version lookup
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ask Docker Hub which n8n versions exist
+        shell: pwsh
+        run: |
+          $out = @(& ./installer/scripts/docker-tag.ps1)
+          $out | ForEach-Object { Write-Host $_ }
+          if (-not ($out | Where-Object { $_ -match '^v2=2\.\d+\.\d+$' })) { throw 'no 2.x.y version was found' }
+          if (-not ($out | Where-Object { $_ -match '^v3=\S+$' })) { throw 'no 3.x version was found' }
