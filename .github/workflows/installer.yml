@@ -1,21 +1,28 @@
 name: Installer
 
-# Builds the Windows installer (installer/n8n-installer.iss) with Inno Setup and tests it on real
-# Windows computers. Docker and WSL2 installs cannot run on GitHub's computers (no Linux containers,
-# no WSL2), so for those two the installer is run in test mode (/DRYRUN) to check which commands it
-# would run; the real thing is tested by hand: see installer/README.md.
+# Builds the Windows installer (installer/n8n-installer.iss) with Inno Setup. Nothing here starts by itself:
+# open the Actions tab, choose Installer, Run workflow, and tick what you want.
+#
+#   (nothing ticked)  Only the build runs (about a minute). The installer is kept as a download on the page of the run.
+#   publish           Builds the finished installer with a clean version number and commits it to the branch that was
+#                     chosen, as n8n-Installer.exe next to SHA256SUMS.txt. This is how the .exe in the repository is made.
+#   tests             Also runs the tests on Windows: the folder and the user-account ways for real (about 15 minutes
+#                     each) and every way, including Docker and Linux (WSL2), in test mode. Docker and WSL2 installs cannot
+#                     run on GitHub's computers (no Linux containers, no WSL2), so for those two the installer is run in
+#                     test mode (/DRYRUN) to check which commands it would run; the real thing is tested by hand: see
+#                     installer/README.md.
 
 on:
-  push:
-    branches: [main, gui-installer]
-    paths:
-      - 'installer/**'
-      - '.github/workflows/installer.yml'
-  pull_request:
-    paths:
-      - 'installer/**'
-      - '.github/workflows/installer.yml'
   workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Put the finished installer into the repository as n8n-Installer.exe'
+        type: boolean
+        default: false
+      tests:
+        description: 'Also run the tests on Windows (about 20 minutes)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -72,12 +79,14 @@ jobs:
 
       - name: Build n8n-Installer.exe
         shell: pwsh
+        env:
+          PUBLISH: ${{ inputs.publish }}
         run: |
           $iss = Get-Content installer/n8n-installer.iss -Raw
           $base = [regex]::Match($iss, '#define AppVersion "([0-9]+\.[0-9]+\.[0-9]+)').Groups[1].Value
           if (-not $base) { throw 'Could not read the version from n8n-installer.iss' }
-          if ($env:GITHUB_REF -like 'refs/tags/v*') {
-            $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          if ($env:PUBLISH -eq 'true') {
+            $version = $base
           } else {
             $version = "$base-dev.$env:GITHUB_RUN_NUMBER"
           }
@@ -98,8 +107,35 @@ jobs:
             installer/dist/SHA256SUMS.txt
           if-no-files-found: error
 
+  # Puts the finished installer into the repository, so that it is listed next to the README. The commit is made in the
+  # name of the repository owner, only when publish is ticked, and only on the branch the run was started on.
+  publish:
+    name: Put n8n-Installer.exe into the repository
+    if: ${{ inputs.publish }}
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: n8n-installer
+          path: dist
+      - name: Commit the installer
+        run: |
+          cp dist/n8n-Installer.exe n8n-Installer.exe
+          cp dist/SHA256SUMS.txt SHA256SUMS.txt
+          hash=$(cut -d' ' -f1 SHA256SUMS.txt | tr -d '\r')
+          git config user.name 'kenneth-leander'
+          git config user.email '190708128+kenneth-leander@users.noreply.github.com'
+          git add n8n-Installer.exe SHA256SUMS.txt
+          git commit -m "Add n8n-Installer.exe, built by GitHub Actions from this branch (SHA-256 $hash)"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
   test-folder:
     name: Test "in a folder of its own" (Windows)
+    if: ${{ inputs.tests }}
     needs: build
     runs-on: windows-latest
     timeout-minutes: 60
@@ -139,6 +175,7 @@ jobs:
 
   test-global:
     name: Test "for this user account" (Windows, Node.js 22)
+    if: ${{ inputs.tests }}
     needs: build
     runs-on: windows-latest
     timeout-minutes: 60
@@ -183,6 +220,7 @@ jobs:
 
   test-every-way:
     name: Test every way in test mode (Windows)
+    if: ${{ inputs.tests }}
     needs: build
     runs-on: windows-latest
     timeout-minutes: 20
@@ -244,6 +282,7 @@ jobs:
 
   test-docker-tag:
     name: Test the Docker version lookup
+    if: ${{ inputs.tests }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

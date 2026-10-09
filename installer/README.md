@@ -1,7 +1,8 @@
 # The n8n Windows Community Installer (the `.exe`)
 
 This folder holds the source of the Windows installer. It is built with [Inno Setup](https://jrsoftware.org/isinfo.php)
-by GitHub Actions (see `.github/workflows/installer.yml`) and replaces the old `n8n-Installer.bat`.
+by GitHub Actions (see `.github/workflows/installer.yml`) and replaces the old batch installer, which is kept in the
+`legacy` folder of the repository.
 
 One window, four ways of running n8n (the same four the `.bat` had):
 
@@ -114,7 +115,13 @@ ISCC.exe installer\n8n-installer.iss
 ```
 
 The installer is written to `installer\dist\n8n-Installer.exe`. GitHub Actions does the same with a pinned,
-checksum-verified copy of the compiler, and uploads the result as an artifact.
+checksum-verified copy of the compiler. Nothing there starts by itself: open the **Actions** tab, choose **Installer**,
+**Run workflow**, and tick what you want.
+
+* Nothing ticked: only the build runs (about a minute) and the installer is kept as a download on the page of the run.
+* **publish**: builds the finished installer with a clean version number and commits it to the branch you chose, as
+  `n8n-Installer.exe` with its checksum in `SHA256SUMS.txt`. This is how the `.exe` in the repository is made.
+* **tests**: also runs the tests described below on Windows (about 20 minutes).
 
 ```
 n8n-installer.iss   the main script: settings, files, shortcuts
@@ -128,8 +135,8 @@ tests\              Test-Install.ps1 (the end to end test), Test-DryRun.ps1 (eve
 
 ## Testing
 
-* **GitHub Actions** builds the installer and then, on real Windows computers, runs `tests\Test-Install.ps1`
-  for the folder way and for the user-account way: install, start n8n, wait until it answers, stop it,
+* **GitHub Actions**, when you tick *tests*, builds the installer and then, on real Windows computers, runs
+  `tests\Test-Install.ps1` for the folder way and for the user-account way: install, start n8n, wait until it answers, stop it,
   install again over it (the data must stay), uninstall (keep the data), install, uninstall and delete the data.
   It also runs the PowerShell helpers on Windows PowerShell 5.1 and asks Docker Hub for the n8n versions.
   `tests\Test-Helpers.ps1` runs the two helpers that ask Docker and WSL what they are doing against stand-ins for
