@@ -17,6 +17,7 @@ param(
     [Parameter(Mandatory = $true)][string]$Dir,
     [int]$Port = 5688,
     [int]$StartTimeoutSec = 300,
+    [int]$SetupTimeoutSec = 1500,
     [string]$WslDistro = ''
 )
 
@@ -54,6 +55,18 @@ function Stop-Here([string]$why) {
     exit 1
 }
 
+# Starts a program and waits for it, but not for ever: a program that hangs is stopped, so the logs get printed
+# instead of the whole run timing out without a word. Returns its exit code (124 when it had to be stopped).
+function Invoke-Timed([string]$file, [string[]]$arguments, [int]$seconds) {
+    $p = Start-Process -FilePath $file -ArgumentList $arguments -PassThru
+    if (-not $p.WaitForExit($seconds * 1000)) {
+        Write-Host "::error::$(Split-Path -Leaf $file) did not finish within $seconds seconds. It is stopped now."
+        & taskkill.exe /PID $p.Id /T /F | Out-Null
+        return 124
+    }
+    return $p.ExitCode
+}
+
 function Invoke-Setup([string]$name, [string[]]$extra) {
     $log = Join-Path $work "setup-$name.log"
     $setupArgs = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/LOG=`"$log`"",
@@ -61,9 +74,13 @@ function Invoke-Setup([string]$name, [string[]]$extra) {
     if ($WslDistro) { $setupArgs += "/WSLDISTRO=$WslDistro" }
     if ($Method -eq 'folder') { $setupArgs += '/ADDPATH=1' }
     Write-Host "Running: $Installer $($setupArgs -join ' ')"
-    $p = Start-Process -FilePath $Installer -ArgumentList $setupArgs -Wait -PassThru
-    Write-Host "Setup exit code: $($p.ExitCode)"
-    return $p.ExitCode
+    $code = Invoke-Timed $Installer $setupArgs $SetupTimeoutSec
+    Write-Host "Setup exit code: $code"
+    return $code
+}
+
+function Invoke-Uninstall([string[]]$extra) {
+    return Invoke-Timed "$Dir\unins000.exe" (@('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') + $extra) 600
 }
 
 # Runs a program and returns what it printed. Its exit code is left in $script:nativeExit. Programs that write
@@ -218,8 +235,8 @@ Check (Wait-Health $StartTimeoutSec) 'n8n answers again after the update'
 Stop-N8n $proc
 
 Say '5. Uninstall and keep the data'
-$u = Start-Process -FilePath "$Dir\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
-Check ($u.ExitCode -eq 0) "the uninstaller finished (exit code $($u.ExitCode))"
+$code = Invoke-Uninstall @()
+Check ($code -eq 0) "the uninstaller finished (exit code $code)"
 Start-Sleep -Seconds 3
 Check (-not (Test-Path "$startMenu\Start n8n.lnk")) 'the Start menu entry is gone'
 Check ($null -eq (Get-UninstallEntry)) 'Apps & features no longer lists it'
@@ -238,8 +255,8 @@ if ($dataDir) { Check (Test-Path "$dataDir\config") 'the data was kept' }
 
 Say '6. Install once more, then uninstall and delete the data'
 if ((Invoke-Setup 'install3' @()) -ne 0) { Stop-Here 'The third install did not finish.' }
-$u = Start-Process -FilePath "$Dir\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/DELETEDATA=1' -Wait -PassThru
-Check ($u.ExitCode -eq 0) "the uninstaller finished (exit code $($u.ExitCode))"
+$code = Invoke-Uninstall @('/DELETEDATA=1')
+Check ($code -eq 0) "the uninstaller finished (exit code $code)"
 Start-Sleep -Seconds 3
 if ($dataDir) { Check (-not (Test-Path $dataDir)) 'the data was deleted' }
 
