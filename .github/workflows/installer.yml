@@ -49,6 +49,16 @@ jobs:
               Write-Host "::error file=$($_.FullName)::contains characters outside plain ASCII"; $bad++
             }
           }
+          # Every @@MARKER@@ in a template has to be filled in by the install code (SetVar), or it would end up in the user's files.
+          $code = (Get-ChildItem installer/code -Filter *.iss | ForEach-Object { Get-Content $_.FullName -Raw }) -join "`n"
+          foreach ($file in Get-ChildItem installer/templates -File) {
+            $markers = [regex]::Matches((Get-Content $file.FullName -Raw), '@@([A-Z0-9_]+)@@') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
+            foreach ($marker in $markers) {
+              if ($code -notmatch ("SetVar\('" + $marker + "'")) {
+                Write-Host "::error file=$($file.FullName)::@@$marker@@ is never filled in (no SetVar('$marker', ...) in installer/code)"; $bad++
+              }
+            }
+          }
           if ($bad) { exit 1 }
 
       - name: Get the Inno Setup compiler
