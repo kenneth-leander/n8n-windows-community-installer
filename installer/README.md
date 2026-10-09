@@ -47,6 +47,27 @@ Where the data (workflows, saved passwords, the encryption key) lives:
 
 The uninstaller asks whether to keep the data and keeps it by default.
 
+## Linux inside Windows (WSL2)
+
+The installer does not set up WSL or a Linux distribution. It uses one you already have (`wsl --install -d Ubuntu`
+in a terminal sets one up). Inside it, it:
+
+* looks around: the default Linux user, its home folder, which Linux it is, and which Node.js is there
+* adds Node.js 22 when there is no Node.js that n8n 2.x runs on (Node.js 22, or 20.19 and newer in the 20 line):
+  from the system packages as root (Debian and Ubuntu, Fedora and Red Hat, Arch, openSUSE), or with nvm when the
+  Node.js belongs to a user and is managed by nvm. On any other Linux (Alpine, for example) it stops and says what
+  to install by hand
+* installs the newest n8n 2.x with `npm install -g`: as root when Node.js is installed for the whole system, as the
+  user when Node.js lives in the user's home folder
+* writes `start-n8n.cmd` and `stop-n8n.cmd` in the install folder, because n8n keeps running inside Linux when the
+  window that started it is gone
+
+n8n keeps its data on the Linux disk, in `.n8n` in the home folder of the default user (File Explorer shows it at
+`\\wsl$\<distribution>\home\<user>\.n8n`). Windows passes n8n on to this computer only, so "other devices on my
+network" is not offered for this way. Uninstalling removes the n8n program from the distribution, keeps the data
+unless you ask for it to be deleted (then you are offered a copy on the desktop first), and does not touch Node.js
+or the distribution.
+
 ## Silent install
 
 ```
@@ -67,8 +88,10 @@ n8n-Installer.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /METHOD=folder /
 | `/WSLDISTRO=Ubuntu` | the WSL2 distribution |
 
 A silent install checks everything first and ends with a non-zero exit code (and a line in the log) when
-something is wrong, instead of waiting for someone to answer. The uninstaller takes `/DELETEDATA=1` to
-delete the data as well.
+something is wrong, instead of waiting for someone to answer: `1` means something about the settings or the
+computer has to change first (a question that would need a yes, like replacing a Docker container or using a
+folder that holds other files, counts as a no), `3` means the install started and failed. The uninstaller takes
+`/DELETEDATA=1` to delete the data as well.
 
 Logs are written to `%LOCALAPPDATA%\n8n-installer\logs`.
 
@@ -112,7 +135,11 @@ tests\              Test-Install.ps1, the end to end test that CI runs
   uninstaller and a note about the install, so the uninstaller can be tried). With it, `/FAKEDOCKER=ready|windows|stopped|missing`,
   `/FAKENODE=22.11.0` and `/FAKEWSL="Ubuntu|2|Running;Debian|1|Stopped"` pretend to have found those things,
   `/DRYRUN=fail` makes every program the installer would start fail, `/SLOW=3` makes every step take 3 seconds, and
-  `/SHOWFILES` prints the start script and the notes it would write, with every setting filled in.
+  `/SHOWFILES` prints the start script and the notes it would write, with every setting filled in. For the WSL2 way
+  they also pretend what Linux answers: `/FAKEWSLUSER=ken` (or `root`), `/FAKEWSLOS=ubuntu` (`fedora`, `alpine`, ...),
+  `/FAKEWSLNODE=22.11.0` (`none`, `18.19.1`), `/FAKEWSLNVM` (Node.js sits in the nvm folder of the user),
+  `/FAKEWSLPREFIX=/home/ken/.npm-global`, `/FAKEWSLN8N=2.40.0` (an n8n is there already) and `/FAKEWSLSTUCK`
+  (adding Node.js changes nothing).
   These are only honoured together with `/DRYRUN`. The uninstaller takes `/DRYRUN` as well: it then says which
   programs it would start (like `docker rm`) and starts none.
 
