@@ -27,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [small, n8n]
+        group: [small, setup-on-c, setup-on-d, plain-on-c]
     steps:
       - uses: actions/checkout@v4
 
@@ -67,7 +67,8 @@ jobs:
             while (-not $p.WaitForExit(2000)) {
               if ($clock.Elapsed.TotalSeconds -ge $next) {
                 $next += 30
-                Write-Host ("  [{0:n0} s] still running. Test program log:" -f $clock.Elapsed.TotalSeconds)
+                Write-Host ("  [{0:n0} s] still running. {1}" -f $clock.Elapsed.TotalSeconds, (Show-Disks))
+                Write-Host '    Test program log:'
                 Get-Content $log -Tail 3 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "    $_" }
                 Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^(cmd|node|conhost|ping)\.exe$' } | ForEach-Object {
                   $cpu = ''; try { $cpu = '{0:n1}s' -f (Get-Process -Id $_.ProcessId -ErrorAction Stop).CPU } catch { }
@@ -85,6 +86,22 @@ jobs:
             Get-Content $log -ErrorAction SilentlyContinue | Where-Object { $_ -notmatch '^  ' } | Select-Object -Last 6 | ForEach-Object { Write-Host "    $_" }
           }
 
+          Write-Host "TEMP is $env:TEMP, RUNNER_TEMP is $env:RUNNER_TEMP"
+          Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Used -ne $null } | ForEach-Object { Write-Host ('drive {0}: {1:n1} GB used, {2:n1} GB free' -f $_.Name, ($_.Used / 1GB), ($_.Free / 1GB)) }
+          try {
+            $mp = Get-MpComputerStatus
+            Write-Host "Defender: antivirus $($mp.AntivirusEnabled), real-time protection $($mp.RealTimeProtectionEnabled)"
+            $pref = Get-MpPreference
+            Write-Host "Defender exclusions: paths [$($pref.ExclusionPath -join '; ')], processes [$($pref.ExclusionProcess -join '; ')]"
+          } catch { Write-Host "Defender status not available: $($_.Exception.Message)" }
+
+          function Show-Disks {
+            try {
+              $c = Get-Counter '\LogicalDisk(C:)\Disk Bytes/sec', '\LogicalDisk(D:)\Disk Bytes/sec', '\LogicalDisk(C:)\Avg. Disk Queue Length', '\LogicalDisk(D:)\Avg. Disk Queue Length' -ErrorAction Stop
+              ($c.CounterSamples | ForEach-Object { '{0} = {1:n1}' -f ($_.Path -replace '^.*logicaldisk', ''), $_.CookedValue }) -join ' ; '
+            } catch { 'disk counters not available' }
+          }
+
           if ($env:GROUP -eq 'small') {
             Run-Case 'c1-nothing' 0 "for /L %i in (1,1,20000) do @echo $line" 180
             Run-Case 'c2-logfile' 2 "for /L %i in (1,1,20000) do @echo $line" 180
@@ -96,7 +113,24 @@ jobs:
             Run-Case 'c8-npm-medium' 4 "npm install --prefix %TEMP%\bench-npm2 express --no-fund --no-audit --loglevel=http" 300
             Run-Case 'c9-to-a-file' 4 "npm install --prefix %TEMP%\bench-npm3 express --no-fund --no-audit --loglevel=http > %TEMP%\npm3.txt 2>&1" 300
           }
+          elseif ($env:GROUP -eq 'setup-on-c') {
+            Run-Case 'n8n-through-setup-on-c' 4 "npm install --prefix C:\bench-n8n n8n@2 --no-fund --no-audit --loglevel=http" 1200
+          }
+          elseif ($env:GROUP -eq 'setup-on-d') {
+            Run-Case 'n8n-through-setup-on-d' 4 "npm install --prefix $env:RUNNER_TEMP\bench-n8n n8n@2 --no-fund --no-audit --loglevel=http" 1200
+          }
           else {
-            New-Item -ItemType Directory -Path (Join-Path $env:TEMP 'bench-n8n') -Force | Out-Null
-            Run-Case 'n8n-through-setup' 4 "npm install --prefix %TEMP%\bench-n8n n8n@2 --no-fund --no-audit --loglevel=http" 1200
+            # No Setup in between: npm started by PowerShell, writing to a file, on drive C:
+            $clock = [Diagnostics.Stopwatch]::StartNew()
+            $out = Join-Path $env:RUNNER_TEMP 'plain-c.txt'
+            $p = Start-Process -FilePath $env:ComSpec -ArgumentList "/c npm install --prefix C:\bench-n8n-plain n8n@2 --no-fund --no-audit --loglevel=http > `"$out`" 2>&1" -PassThru -WindowStyle Hidden
+            $next = 60
+            while (-not $p.WaitForExit(5000)) {
+              if ($clock.Elapsed.TotalSeconds -ge $next) {
+                $next += 60
+                Write-Host ("  [{0:n0} s] plain npm on C: still running; output {1:n0} KB. {2}" -f $clock.Elapsed.TotalSeconds, ((Get-Item $out).Length / 1KB), (Show-Disks))
+              }
+              if ($clock.Elapsed.TotalSeconds -ge 1200) { Write-Host '::error::plain npm on C: did not finish in 20 minutes'; & taskkill.exe /PID $p.Id /T /F | Out-Null; break }
+            }
+            Write-Host ("plain npm on C: ended after {0:n0} s, exit code {1}" -f $clock.Elapsed.TotalSeconds, $p.ExitCode)
           }
