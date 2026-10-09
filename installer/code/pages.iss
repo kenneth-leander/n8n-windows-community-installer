@@ -512,7 +512,8 @@ procedure BuildOptionsPage;
 begin
   PageOptions := CreateCustomPage(PageWsl.ID, 'Shortcuts and options', 'A Start menu entry is always created.');
   CbDesktop := NewCheck(PageOptions, 'Put a Start n8n shortcut on my desktop', 0, True);
-  CbPath := NewCheck(PageOptions, 'Let me type n8n in any terminal window (adds this n8n to my PATH)', Below(CbDesktop, 8), True);
+  // Off unless asked for: it changes the PATH of the user account, which most people never need.
+  CbPath := NewCheck(PageOptions, 'Let me type n8n in any terminal window (adds this n8n to my PATH)', Below(CbDesktop, 8), False);
 end;
 
 // ---------------------------------------------------------------------------
@@ -532,6 +533,26 @@ begin
   if GWantedMethod = MethodDocker then Result := DockerStatusText
   else if GWantedMethod = MethodGlobal then Result := GlobalNote
   else if GWantedMethod = MethodWsl then Result := WslNote;
+end;
+
+// Express on a folder that already holds an install of the same kind is an update: it keeps that install's port,
+// network choice and Docker names, so the update lands on the same container, data volume and address.
+procedure ApplyExistingInstall(const Dir: String);
+var
+  Ini, Value: String;
+begin
+  Ini := Dir + '\n8n-installer.ini';
+  if not FileExists(Ini) then Exit;
+  if GetIniString('install', 'method', '', Ini) <> ChosenMethod then Exit;
+  FileLog('Updating the install in ' + Dir);
+  if not SwitchGiven('PORT') then
+    EdPort.Text := GetIniString('install', 'port', EdPort.Text, Ini);
+  if not SwitchGiven('LAN') then
+    CbLan.Checked := S2B(GetIniString('install', 'lan', '0', Ini));
+  Value := GetIniString('install', 'docker_name', '', Ini);
+  if (Value <> '') and not SwitchGiven('DOCKERNAME') then EdDockerName.Text := Value;
+  Value := GetIniString('install', 'docker_volume', '', Ini);
+  if (Value <> '') and not SwitchGiven('DOCKERVOLUME') then EdDockerVolume.Text := Value;
 end;
 
 function ModePageNext(Sender: TWizardPage): Boolean;
@@ -554,6 +575,7 @@ begin
       EdPort.Text := IntToStr(FirstFreePort(StrToIntDef(Trim(EdPort.Text), DefaultPort)));
     if not SwitchGiven('LAN') then
       CbLan.Checked := False;
+    ApplyExistingInstall(CutBackslash(WizardDirValue));
   end;
 end;
 

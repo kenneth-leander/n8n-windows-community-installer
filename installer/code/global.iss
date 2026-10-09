@@ -31,7 +31,8 @@ begin
   GQuiet := False;
   Working(False);
   if Code <> 0 then
-    Fail('npm could not install n8n (exit code ' + IntToStr(Code) + ').' + #13#10#13#10 + LastLinesText);
+    Fail('npm could not install n8n (exit code ' + IntToStr(Code) + '). If n8n is running right now, close it and try again.'
+      + #13#10#13#10 + LastLinesText);
 
   Root := NpmGlobalRoot;
   if GDryRun and (Root = '') then

@@ -59,6 +59,7 @@ function Invoke-Setup([string]$name, [string[]]$extra) {
     $setupArgs = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/LOG=`"$log`"",
         "/METHOD=$Method", "/DIR=`"$Dir`"", "/PORT=$Port", '/DESKTOP=0') + $extra
     if ($WslDistro) { $setupArgs += "/WSLDISTRO=$WslDistro" }
+    if ($Method -eq 'folder') { $setupArgs += '/ADDPATH=1' }
     Write-Host "Running: $Installer $($setupArgs -join ' ')"
     $p = Start-Process -FilePath $Installer -ArgumentList $setupArgs -Wait -PassThru
     Write-Host "Setup exit code: $($p.ExitCode)"
@@ -73,6 +74,17 @@ function Invoke-Native([scriptblock]$command) {
     try { $out = & $command 2>&1 } finally { $ErrorActionPreference = $saved }
     $script:nativeExit = $LASTEXITCODE
     return $out
+}
+
+# The entry of this install in Windows Settings, Apps (the uninstaller registers it for the current user).
+function Get-UninstallEntry {
+    $root = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall'
+    if (-not (Test-Path $root)) { return $null }
+    foreach ($key in Get-ChildItem $root) {
+        $item = Get-ItemProperty -Path $key.PSPath
+        if ($item.InstallLocation -and ($item.InstallLocation.TrimEnd('\') -ieq $Dir.TrimEnd('\'))) { return $item }
+    }
+    return $null
 }
 
 function Test-Health {
@@ -138,11 +150,16 @@ Check (Test-Path "$Dir\README.txt") 'README.txt was written'
 Check (Test-Path "$Dir\n8n-installer.ini") 'the install record was written'
 Check (Test-Path "$Dir\unins000.exe") 'the uninstaller is there'
 Check (Test-Path "$startMenu\Start n8n.lnk") 'the Start menu entry exists'
+$entry = Get-UninstallEntry
+Check ($null -ne $entry) 'Apps & features lists this install'
+if ($entry) { Write-Host "  listed as: $($entry.DisplayName)  (version $($entry.DisplayVersion))" }
 $record = if (Test-Path "$Dir\n8n-installer.ini") { Get-Content "$Dir\n8n-installer.ini" -Raw } else { '' }
 Check ($record -match "method=$Method") "the record says method=$Method"
 if ($Method -eq 'folder') {
     Check (Test-Path "$Dir\node\node.exe") 'Node.js is in the folder'
     Check (Test-Path "$Dir\node_modules\n8n\package.json") 'n8n is in the folder'
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    Check ($userPath -like "*$Dir\bin*") 'the n8n command folder was added to the PATH of the user'
 }
 
 Say '2. Start n8n and wait for it to answer'
@@ -205,10 +222,13 @@ $u = Start-Process -FilePath "$Dir\unins000.exe" -ArgumentList '/VERYSILENT', '/
 Check ($u.ExitCode -eq 0) "the uninstaller finished (exit code $($u.ExitCode))"
 Start-Sleep -Seconds 3
 Check (-not (Test-Path "$startMenu\Start n8n.lnk")) 'the Start menu entry is gone'
+Check ($null -eq (Get-UninstallEntry)) 'Apps & features no longer lists it'
 Check (-not (Test-Path "$Dir\start-n8n.cmd")) 'start-n8n.cmd is gone'
 if ($Method -eq 'folder') {
     Check (-not (Test-Path "$Dir\node")) 'Node.js is gone from the folder'
     Check (-not (Test-Path "$Dir\node_modules")) 'n8n is gone from the folder'
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    Check (-not ($userPath -like "*$Dir\bin*")) 'the PATH of the user is clean again'
 }
 if ($Method -eq 'global') {
     $null = Invoke-Native { & npm.cmd ls -g n8n --depth=0 }

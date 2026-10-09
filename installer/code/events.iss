@@ -166,6 +166,13 @@ begin
     T := T + 'Node.js ' + PrivateNodeLine + ' is downloaded into the folder, so you need nothing else installed.' + NewLine + NewLine;
 
   T := T + 'Install folder (start script, notes and uninstaller):' + NewLine + Space + CutBackslash(WizardDirValue) + NewLine + NewLine;
+  if FileExists(CutBackslash(WizardDirValue) + '\n8n-installer.ini') then
+  begin
+    T := T + 'This folder already has an n8n install. It is updated, and your workflows and settings are kept.';
+    if Cfg.Method = MethodFolder then
+      T := T + ' If n8n is running from it, it is closed first.';
+    T := T + NewLine + NewLine;
+  end;
   T := T + 'Your workflows and settings are kept in:' + NewLine + Space + DataLocationText + NewLine + NewLine;
 
   Shortcuts := 'Start menu';
@@ -342,9 +349,10 @@ begin
   if Result = '' then Result := 'n8n';
 end;
 
+// The name in Windows Settings, Apps. Method, port and folder tell several installs apart.
 function GetUninstallDisplayName(Param: String): String;
 begin
-  Result := 'n8n (' + MethodTitle(Cfg.Method) + ', ' + LocalUrl(Cfg.Port) + ')';
+  Result := 'n8n (' + MethodTitle(Cfg.Method) + ', port ' + IntToStr(Cfg.Port) + ', folder ' + GetGroupName('') + ')';
 end;
 
 function WantDesktop: Boolean;

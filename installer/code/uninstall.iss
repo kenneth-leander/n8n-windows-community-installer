@@ -18,8 +18,7 @@ var
 begin
   Dir := CutBackslash(ExpandConstant('{app}'));
   // Stop an n8n that is still running from this folder, or its files cannot be removed.
-  RunTool(PowerShellExe, '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ' +
-    Q('Get-Process -Name node -ErrorAction SilentlyContinue | Where-Object { $_.Path -like ''' + Dir + '\node\*'' } | Stop-Process -Force'), '');
+  StopFolderN8n(Dir);
   if LoadState('path_added', '0') = '1' then
     RemoveFromUserPath(Dir + '\bin');
   DelTree(Dir + '\node', True, True, True);

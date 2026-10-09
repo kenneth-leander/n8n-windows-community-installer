@@ -27,6 +27,18 @@ begin
     Result := FirstNonEmpty(Lines);
 end;
 
+// Stops an n8n that is running from this folder. Its Node.js keeps the files open, and open files cannot be
+// replaced or removed.
+procedure StopFolderN8n(const Dir: String);
+var
+  Prefix: String;
+begin
+  Prefix := ReplaceAll(Dir + '\node\', '''', '''''');
+  RunTool(PowerShellExe, '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ' +
+    Q('Get-Process -Name node -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith(''' + Prefix +
+      ''', [StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force'), '');
+end;
+
 procedure InstallPrivateNode;
 var
   Have, Base, Line, Sha, FileName, Archive, Unpacked: String;
@@ -185,6 +197,8 @@ end;
 procedure InstallFolder;
 begin
   GHadPrivateNode := FileExists(NodeDir + '\node.exe');
+  if GHadPrivateNode then
+    StopFolderN8n(AppDir);
   InstallPrivateNode;
   InstallFolderPackages;
   WriteFolderLaunchers;

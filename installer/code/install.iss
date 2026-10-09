@@ -21,7 +21,11 @@ end;
 // What the user sees while a step runs.
 procedure Step(const Text: String);
 begin
-  LogLine('');
+  // A blank line between steps, but not above the first one.
+  if (GLogMemo <> nil) and (GLogMemo.Lines.Count = 0) then
+    FileLog('')
+  else
+    LogLine('');
   LogLine('== ' + Text);
   WizardForm.StatusLabel.Caption := Text;
   WizardForm.FilenameLabel.Caption := '';
