@@ -21,7 +21,7 @@ var
   Root, AppData, RunLine, PathLine: String;
 begin
   if not GNodeOk then
-    Fail('This computer does not have Node.js 22 (or 20.19 or newer), which this option needs. Choose "Windows, in a folder of its own" instead.');
+    Fail('Node.js 22 (or 20.19 or newer) is needed for this way, and it cannot be used here. ' + GlobalWhy(WhereSilent));
 
   Step('Installing n8n for this user account. This takes a few minutes and uses the internet.');
   Working(True);

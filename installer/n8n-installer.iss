@@ -61,9 +61,12 @@ ChangesEnvironment=yes
 
 ; Looks
 WizardStyle=modern dynamic
-WizardSizePercent=125,115
+WizardSizePercent=135,125
 WizardImageFile=assets\wizard-side.bmp
 WizardSmallImageFile=assets\wizard-small.bmp
+; Windows in dark mode: the same pictures (without these the wizard shows the stock Setup picture instead)
+WizardImageFileDynamicDark=assets\wizard-side.bmp
+WizardSmallImageFileDynamicDark=assets\wizard-small.bmp
 SetupIconFile=assets\n8n.ico
 UninstallDisplayIcon={app}\n8n.ico
 UninstallDisplayName={code:GetUninstallDisplayName}

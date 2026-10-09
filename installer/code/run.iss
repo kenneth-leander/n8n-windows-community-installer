@@ -10,6 +10,7 @@ var
   GQuiet: Boolean;         // keep tool output in the log file only (npm prints a lot)
   GLineCount: Integer;
   GLastLines: array [0..9] of String;   // the last few lines, to show in an error
+  GCaptureErrors: TArrayOfString;       // what the last captured program wrote to its error output
 
 procedure RememberLine(const S: String);
 var
@@ -115,7 +116,8 @@ begin
   Result := RunTool(ExpandConstant('{cmd}'), '/S /C "' + CommandLine + '"', WorkDir);
 end;
 
-// Runs a program and returns everything it printed, line by line (stdout and stderr apart).
+// Runs a program and returns what it printed, line by line. What it wrote to its error output is kept apart,
+// in GCaptureErrors, for callers that want to say what went wrong.
 function CaptureTool(const Exe, Params: String; var Lines: TArrayOfString; var ExitCode: Integer): Boolean;
 var
   Output: TExecOutput;
@@ -123,10 +125,14 @@ begin
   Result := False;
   ExitCode := -1;
   SetArrayLength(Lines, 0);
+  SetArrayLength(GCaptureErrors, 0);
   try
     Result := ExecAndCaptureOutput(Exe, Params, '', SW_HIDE, ewWaitUntilTerminated, ExitCode, Output);
     if Result then
+    begin
       Lines := Output.StdOut;
+      GCaptureErrors := Output.StdErr;
+    end;
   except
     FileLog('! ' + GetExceptionMessage);
   end;
@@ -167,14 +173,24 @@ begin
     Result := Result + ' ' + Args;
 end;
 
-// Runs one of the helper scripts and returns what it printed.
+// Runs one of the helper scripts and returns its exit code (-1 if PowerShell could not be started). Lines gets what the
+// script printed; what it wrote to its error output is in GCaptureErrors. Both are also written to the log, so that a
+// check that went wrong can be read about afterwards.
 function RunHelperCapture(const Script, Args: String; var Lines: TArrayOfString): Integer;
 var
-  Code: Integer;
+  Code, I: Integer;
 begin
   ExtractTemporaryFile(Script);
   if not CaptureTool(PowerShellExe, PsParams(Script, Args), Lines, Code) then
     Code := -1;
+  FileLog('  ' + Script + ' ended with code ' + IntToStr(Code) + ', printed ' + IntToStr(GetArrayLength(Lines)) +
+    ' line(s) and wrote ' + IntToStr(GetArrayLength(GCaptureErrors)) + ' line(s) to its error output');
+  for I := 0 to GetArrayLength(Lines) - 1 do
+    if I < 20 then
+      FileLog('    | ' + ReplaceAll(Lines[I], #0, ''));
+  for I := 0 to GetArrayLength(GCaptureErrors) - 1 do
+    if I < 20 then
+      FileLog('    ! ' + ReplaceAll(GCaptureErrors[I], #0, ''));
   Result := Code;
 end;
 

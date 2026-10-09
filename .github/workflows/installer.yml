@@ -110,14 +110,24 @@ jobs:
           name: n8n-installer
           path: dist
 
+      # The two scripts that look at the computer, run for real under the PowerShell that comes with Windows (5.1), on
+      # a computer that may or may not have Docker and WSL. Whatever they find, each line has to have the shape the
+      # installer reads: a way of running n8n that cannot be used always comes with the reason.
       - name: Helper scripts under Windows PowerShell 5.1
         shell: pwsh
         run: |
           foreach ($name in 'docker-probe', 'wsl-list') {
-            $out = & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "installer\scripts\$name.ps1"
-            Write-Host "$name printed: [$out]"
-            if ($LASTEXITCODE -ne 0) { throw "$name.ps1 exited with $LASTEXITCODE" }
-            if ($name -eq 'docker-probe' -and "$out" -notmatch '^(ready|windows|stopped|missing)(\|.*)?$') { throw "docker-probe.ps1 printed something unexpected" }
+            $out = @(& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "installer\scripts\$name.ps1")
+            $code = $LASTEXITCODE
+            Write-Host "$name printed: [$($out -join ' // ')]"
+            if ($code -ne 0) { throw "$name.ps1 exited with $code" }
+            if ($name -eq 'docker-probe') {
+              if ($out.Count -ne 1 -or "$($out[0])" -notmatch '^(ready\|[^|]+|windows\|[^|]+|stopped\|.+|missing(\|installed)?)$') { throw 'docker-probe.ps1 did not print exactly one line of a known shape' }
+            } else {
+              foreach ($line in $out) {
+                if ("$line" -notmatch '^(![ -~]+|[ -~]+\|[12]\|[ -~]+)$') { throw "wsl-list.ps1 printed a line of an unknown shape: [$line]" }
+              }
+            }
           }
 
       # The system drive (C:) of GitHub's Windows computers is very slow for the many small files npm writes: n8n takes
@@ -202,6 +212,14 @@ jobs:
         with:
           name: n8n-installer
           path: dist
+
+      # The helper scripts that ask Docker and WSL what they are doing, against stand-ins for docker.exe and wsl.exe that
+      # work, complain, print nonsense, fail without a word or never answer. Run with Windows PowerShell 5.1, as on a user's PC.
+      - name: Helper scripts against stand-ins for Docker and WSL
+        shell: pwsh
+        run: |
+          & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File installer\tests\Test-Helpers.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Test-Helpers.ps1 exited with $LASTEXITCODE" }
 
       - name: Docker, Linux (WSL2) and the rest, without installing anything
         shell: pwsh

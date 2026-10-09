@@ -13,11 +13,13 @@ var
 
   // Express or Custom
   RbExpress, RbCustom: TNewRadioButton;
-  LblExpressInfo, LblCustomInfo, LblChecking: TNewStaticText;
+  LblExpressInfo, LblExpressWhy, LblExpressHelp, LblCustomInfo, LblChecking: TNewStaticText;
 
   // how n8n runs
   RbDocker, RbFolder, RbGlobal, RbWsl: TNewRadioButton;
   LblDockerInfo, LblFolderInfo, LblGlobalInfo, LblWslInfo: TNewStaticText;
+  // Why an option is greyed out: Why is the reason in one highlighted line, Help says what was found and what to do
+  LblDockerWhy, LblDockerHelp, LblGlobalWhy, LblGlobalHelp, LblWslWhy, LblWslHelp: TNewStaticText;
   BtnRecheck: TNewButton;
 
   // network
@@ -40,10 +42,40 @@ var
   GDirFromSwitch: Boolean;   // /DIR= was given, never suggest another folder
   GWantDistro: String;       // /WSLDISTRO= from the command line
   GWantedMethod: String;     // /METHOD= from the command line
+  GLineHeight: Integer;      // the height of one line of text on this screen, measured once
 
 // ---------------------------------------------------------------------------
 // Building blocks
 // ---------------------------------------------------------------------------
+
+// Setup scales what is on its own forms, but not the controls that code makes: their sizes have to go through
+// ScaleX and ScaleY, and a line of text is measured with the font in use. Without that, a radio button or check box
+// keeps its size for 100% display scaling and cuts its caption off at 150% or 250%.
+function LineHeight: Integer;
+var
+  L: TNewStaticText;
+begin
+  if GLineHeight = 0 then
+  begin
+    L := TNewStaticText.Create(WizardForm);
+    L.Parent := WizardForm;
+    L.AutoSize := False;
+    L.WordWrap := False;
+    L.Caption := 'Wg';
+    L.AdjustHeight;
+    GLineHeight := L.Height;
+    L.Free;
+  end;
+  Result := GLineHeight;
+end;
+
+// The height of a radio button or check box: a line of text with a little room, and never less than the usual 17.
+function ControlHeight: Integer;
+begin
+  Result := LineHeight + ScaleY(4);
+  if Result < ScaleY(17) then
+    Result := ScaleY(17);
+end;
 
 function NewText(const Page: TWizardPage; const Text: String; const Indent: Integer; const Top: Integer; const Bold: Boolean): TNewStaticText;
 begin
@@ -73,6 +105,7 @@ begin
   Result.Left := 0;
   Result.Top := Top;
   Result.Width := Page.SurfaceWidth;
+  Result.Height := ControlHeight;
   Result.Caption := Caption;
 end;
 
@@ -83,6 +116,7 @@ begin
   Result.Left := 0;
   Result.Top := Top;
   Result.Width := Page.SurfaceWidth;
+  Result.Height := ControlHeight;
   Result.Caption := Caption;
   Result.Checked := Checked;
 end;
@@ -110,6 +144,40 @@ end;
 function Below(const Control: TControl; const Gap: Integer): Integer;
 begin
   Result := Control.Top + Control.Height + ScaleY(Gap);
+end;
+
+// The colour of the line that says why something cannot be used: a warm one that reads on light and on dark backgrounds.
+function WhyColor: TColor;
+begin
+  if IsDarkInstallMode then
+    Result := $0054B4FF
+  else
+    Result := $00004EB0;
+end;
+
+// The line that says why something cannot be used. It stands out (bold and coloured) and stays hidden until there is
+// a reason to show.
+function NewWhy(const Page: TWizardPage; const Indent: Integer): TNewStaticText;
+begin
+  Result := NewText(Page, '', Indent, 0, True);
+  // The dark style of the wizard would paint over the colour; this control keeps its own.
+  Result.StyleElements := [];
+  Result.Font.Color := WhyColor;
+  Result.Visible := False;
+end;
+
+// The text under it: what was found, what the program said, and what to do. Ordinary text, hidden until needed.
+function NewHelp(const Page: TWizardPage; const Indent: Integer): TNewStaticText;
+begin
+  Result := NewText(Page, '', Indent, 0, False);
+  Result.Visible := False;
+end;
+
+procedure SetReason(const Why, Help: TNewStaticText; const WhyText, HelpText: String);
+begin
+  SetText(Why, WhyText);
+  Why.Font.Color := WhyColor;
+  SetText(Help, HelpText);
 end;
 
 // ---------------------------------------------------------------------------
@@ -206,38 +274,210 @@ begin
 end;
 
 // ---------------------------------------------------------------------------
-// Text on the pages that depends on what was found on this computer
+// Text that depends on what was found on this computer
+//
+// Every way of running n8n that cannot be used has a reason, and the reason says what was actually found: the words of
+// the program that was asked (Docker, WSL, Node.js), or that the check itself did not work. Nothing is greyed out
+// without saying why. The reasons are shown in a highlighted line on the pages; a silent install gets the same
+// words as its error message.
 // ---------------------------------------------------------------------------
 
+const
+  WhereSilent = 0;     // the text is an error message, as nobody is looking at a page
+  WherePage = 1;       // the "How should n8n run?" page, which has a Check again button
+  WhereExpress = 2;    // the Express page, which has none: the way to look again is the Custom install page
+
+// Fills in what to do once the problem is fixed, as that depends on where the text is shown.
+function WithRecheck(const Text: String; const Where: Integer): String;
+var
+  Again: String;
+begin
+  if Where = WherePage then Again := 'press Check again'
+  else if Where = WhereExpress then Again := 'choose Custom install and press Check again'
+  else Again := 'run the installer again';
+  Result := ReplaceAll(Text, '#RECHECK#', Again);
+end;
+
+// What a program said, made fit for where it is shown: all of it in an error message, cut short on a page. The end of
+// the text is kept when that is where the cause is named (Docker), the beginning otherwise.
+function SaidText(const Said: String; const Where: Integer; const FromEnd: Boolean): String;
+begin
+  if Where = WhereSilent then
+    Result := AsSentence(Said)
+  else if FromEnd then
+    Result := AsSentence(EndOf(Said, 180))
+  else
+    Result := AsSentence(StartOf(Said, 180));
+end;
+
+// Why Docker cannot be used. Why is the reason in a few words; Help says what Docker said and what to do about it.
+// Both are '' when Docker can be used.
+procedure DockerWhyParts(const Where: Integer; var Why, Help: String);
+var
+  Said: String;
+begin
+  Why := '';
+  Help := '';
+  if DockerReady then Exit;
+  Said := '';
+  if GDockerDetail <> '' then
+  begin
+    Said := SaidText(GDockerDetail, Where, True);
+    if GDockerSaid then
+      Said := 'Docker said: ' + Said;
+  end;
+  if GDockerState = 'windows' then
+  begin
+    Why := 'Docker is set to Windows containers, and n8n needs Linux containers.';
+    Help := 'Switch it to Linux containers in the Docker Desktop menu, then #RECHECK#.';
+  end
+  else if GDockerState = 'stopped' then
+  begin
+    Why := 'Docker is installed, but it is not ready.';
+    Help := JoinText(Said, 'Start Docker Desktop and wait until it says it is running, then #RECHECK#.');
+  end
+  else if GDockerState = 'error' then
+  begin
+    Why := 'Setup could not find out whether Docker is ready.';
+    Help := JoinText(Said, 'Please #RECHECK# to try once more.');
+  end
+  else if GDockerDetail = 'installed' then
+  begin
+    Why := 'Docker Desktop is installed, but Setup cannot find its docker.exe.';
+    Help := 'Windows has not told this program where to look yet. Sign out of Windows and sign in again, then start this installer again.';
+  end
+  else
+  begin
+    Why := 'Docker was not found on this computer.';
+    Help := 'To use it, install Docker Desktop from docker.com and start it, then #RECHECK#.';
+  end;
+  Help := WithRecheck(Help, Where);
+end;
+
+// What to do instead: the folder way brings its own Node.js. A silent install is told the switch to use.
+function UseFolderInstead(const Where: Integer): String;
+begin
+  if Where = WhereSilent then
+    Result := 'Use /METHOD=folder instead: it brings its own Node.js.'
+  else
+    Result := 'Use "Windows, in a folder of its own" instead: it brings its own Node.js.';
+end;
+
+// Why the Node.js on this computer cannot be used, in the same two parts. Both are '' when it can be used.
+procedure GlobalWhyParts(const Where: Integer; var Why, Help: String);
+begin
+  Why := '';
+  Help := '';
+  if GNodeOk then Exit;
+  if GNodeVersion <> '' then
+  begin
+    Why := 'Your Node.js (' + GNodeVersion + ') is not one that n8n 2.x is tested with here.';
+    Help := UseFolderInstead(Where);
+  end
+  else if GNodeDetail <> '' then
+  begin
+    Why := 'Setup could not check Node.js.';
+    Help := JoinText(SaidText(GNodeDetail, Where, False), UseFolderInstead(Where));
+  end
+  else
+  begin
+    Why := 'Node.js was not found on this computer.';
+    Help := UseFolderInstead(Where);
+  end;
+end;
+
+const
+  InstallADistro = 'install one first, for example with  wsl --install -d Ubuntu  in a terminal, then #RECHECK#.';
+
+// Why there is no Linux distribution to use in WSL, in the same two parts. Both are '' when there is one.
+procedure WslWhyParts(const Where: Integer; var Why, Help: String);
+begin
+  Why := '';
+  Help := '';
+  if GWslCount > 0 then Exit;
+  if not GWslHasExe then
+  begin
+    Why := 'WSL is not installed on this computer.';
+    Help := 'To use it, open a terminal as administrator, run  wsl --install -d Ubuntu , restart Windows, then start this installer again.';
+  end
+  else if GWslProblem <> '' then
+  begin
+    Why := 'WSL did not list a Linux distribution.';
+    // The beginning of what WSL said is the part that says what is the matter.
+    Help := JoinText(SaidText(GWslProblem, Where, False), 'To use this way, ' + InstallADistro);
+  end
+  else
+  begin
+    Why := 'WSL did not list a Linux distribution.';
+    Help := 'To use this way, ' + InstallADistro;
+  end;
+  Help := WithRecheck(Help, Where);
+end;
+
+function DockerWhy(const Where: Integer): String;
+var
+  Why, Help: String;
+begin
+  DockerWhyParts(Where, Why, Help);
+  Result := JoinText(Why, Help);
+end;
+
+function GlobalWhy(const Where: Integer): String;
+var
+  Why, Help: String;
+begin
+  GlobalWhyParts(Where, Why, Help);
+  Result := JoinText(Why, Help);
+end;
+
+function WslWhy(const Where: Integer): String;
+var
+  Why, Help: String;
+begin
+  WslWhyParts(Where, Why, Help);
+  Result := JoinText(Why, Help);
+end;
+
+// What the install code says when Docker is not ready, just before it starts.
 function DockerStatusText: String;
 begin
-  if GDockerState = 'ready' then
+  if DockerReady then
     Result := 'Docker is running on this computer.'
-  else if GDockerState = 'windows' then
-    Result := 'Docker is running, but it is set to Windows containers. Switch it to Linux containers in the Docker Desktop menu, then press Check again.'
-  else if GDockerState = 'stopped' then
-    Result := 'Docker Desktop is installed but not running. Start it, wait until it says it is running, then press Check again.'
   else
-    Result := 'Docker Desktop was not found on this computer. Install it from docker.com, start it, then press Check again.';
+    Result := DockerWhy(WhereSilent);
 end;
 
-// What was found about Node.js, in words.
-function GlobalNote: String;
+function DockerInfo: String;
 begin
+  Result := 'n8n runs in a Docker container: clean, easy to back up, and the only way to keep working with n8n 3.0.';
+  if DockerReady then
+    Result := Result + ' Docker ' + GDockerVersion + ' is running on this computer.';
+end;
+
+function GlobalInfo: String;
+begin
+  Result := 'Adds n8n to the Node.js that is already installed, so the n8n command works in every terminal. Needs Node.js 22. Stays on n8n 2.x.';
   if GNodeOk then
-    Result := 'Node.js ' + GNodeVersion + ' was found on this computer.'
-  else if GNodeVersion <> '' then
-    Result := 'Your Node.js (' + GNodeVersion + ') is not one that n8n 2.x is tested with here. Use the folder option instead, which brings its own.'
-  else
-    Result := 'Node.js was not found. Use the folder option instead, which brings its own.';
+    Result := Result + ' Node.js ' + GNodeVersion + ' was found.';
 end;
 
-function WslNote: String;
+function WslInfo: String;
+var
+  I: Integer;
+  Names: String;
 begin
+  Result := 'Installs n8n inside a Linux distribution you already have in WSL2, with Linux file speed. Stays on n8n 2.x.';
   if GWslCount > 0 then
-    Result := IntToStr(GWslCount) + ' Linux distribution(s) found.'
-  else
-    Result := 'No Linux distribution is set up in WSL on this computer. Install one first, for example with the command  wsl --install -d Ubuntu  in a terminal.';
+  begin
+    Names := '';
+    for I := 0 to GWslCount - 1 do
+      if I < 3 then
+        Names := Names + ', ' + GWslName[I];
+    Delete(Names, 1, 2);
+    if GWslCount > 3 then
+      Names := Names + ' and more';
+    Result := Result + ' Found: ' + Names + '.';
+  end;
 end;
 
 function ExpressMethod: String;
@@ -245,7 +485,64 @@ begin
   if DockerReady then Result := MethodDocker else Result := MethodFolder;
 end;
 
+// Express quietly uses the folder way when Docker is not ready. Someone who has Docker would wonder why, so that is
+// said. When Docker is simply not installed there is nothing to explain, and Why is ''.
+procedure ExpressWhyParts(var Why, Help: String);
+begin
+  Why := '';
+  Help := '';
+  if DockerReady then Exit;
+  if (GDockerState = 'missing') and (GDockerDetail = '') then Exit;
+  DockerWhyParts(WhereExpress, Why, Help);
+  Why := Why + ' So Express does not use it.';
+end;
+
+// Puts one way of running n8n on the page at Top: its radio button, its description (unless ShowInfo is False) and, only
+// when the way cannot be used, the highlighted reason with the help under it (Why is nil for a way that can always be
+// used). Returns where the next one starts.
+function PlaceOption(const Radio: TNewRadioButton; const Info, Why, Help: TNewStaticText; const ShowInfo: Boolean; const Top: Integer): Integer;
+begin
+  Radio.Top := Top;
+  Result := Below(Radio, 1);
+  Info.Visible := ShowInfo;
+  if ShowInfo then
+  begin
+    Info.Top := Result;
+    Result := Below(Info, 0);
+  end;
+  if Why <> nil then
+  begin
+    Why.Visible := Why.Caption <> '';
+    Help.Visible := Why.Visible and (Help.Caption <> '');
+    if Why.Visible then
+    begin
+      Why.Top := Result + ScaleY(3);
+      Result := Below(Why, 0);
+      if Help.Visible then
+      begin
+        Help.Top := Result;
+        Result := Below(Help, 0);
+      end;
+    end;
+  end;
+  Result := Result + ScaleY(9);
+end;
+
+// Lays the four ways out from the top and returns where the last one ends. Hide says which descriptions to leave out, for
+// a page that would otherwise not fit. It only ever leaves out those of ways that cannot be used, as their reasons
+// say more: 0 none, 1 the Node.js way's, 2 that one and the Linux way's, 3 all three, with Docker's.
+function LayoutMethodPage(const Hide: Integer): Integer;
+begin
+  Result := PlaceOption(RbDocker, LblDockerInfo, LblDockerWhy, LblDockerHelp, DockerReady or (Hide < 3), 0);
+  Result := PlaceOption(RbFolder, LblFolderInfo, nil, nil, True, Result);
+  Result := PlaceOption(RbGlobal, LblGlobalInfo, LblGlobalWhy, LblGlobalHelp, GNodeOk or (Hide < 1), Result);
+  Result := PlaceOption(RbWsl, LblWslInfo, LblWslWhy, LblWslHelp, (GWslCount > 0) or (Hide < 2), Result);
+end;
+
 procedure RefreshModeText;
+var
+  Why, Help: String;
+  Top: Integer;
 begin
   if not GDetected then Exit;
   LblChecking.Visible := False;
@@ -253,37 +550,55 @@ begin
     SetText(LblExpressInfo, 'Docker is running on this computer, so n8n will run in Docker. The only thing you may need to do is wait a few minutes while it downloads.')
   else
     SetText(LblExpressInfo, 'n8n is installed in its own folder on Windows. You do not have to install anything else first. It takes a few minutes while it downloads.');
-  LblCustomInfo.Top := Below(LblExpressInfo, 18) + ScaleY(24);
-  RbCustom.Top := LblCustomInfo.Top - ScaleY(22);
+  ExpressWhyParts(Why, Help);
+  SetReason(LblExpressWhy, LblExpressHelp, Why, Help);
+
+  LblExpressInfo.Top := Below(RbExpress, 1);
+  Top := Below(LblExpressInfo, 0);
+  LblExpressWhy.Visible := Why <> '';
+  LblExpressHelp.Visible := (Why <> '') and (Help <> '');
+  if LblExpressWhy.Visible then
+  begin
+    LblExpressWhy.Top := Below(LblExpressInfo, 4);
+    Top := Below(LblExpressWhy, 0);
+    if LblExpressHelp.Visible then
+    begin
+      LblExpressHelp.Top := Below(LblExpressWhy, 0);
+      Top := Below(LblExpressHelp, 0);
+    end;
+  end;
+  RbCustom.Top := Top + ScaleY(16);
+  LblCustomInfo.Top := Below(RbCustom, 1);
 end;
 
 procedure RefreshMethodText;
+var
+  Why, Help: String;
+  Hide: Integer;
 begin
   if not GDetected then Exit;
 
   RbDocker.Enabled := DockerReady;
-  SetText(LblDockerInfo, 'n8n runs in a Docker container: clean, easy to back up, and the only way that will keep working with n8n 3.0. ' +
-    DockerStatusText);
-
   RbFolder.Enabled := True;
+  RbGlobal.Enabled := GNodeOk;
+  RbWsl.Enabled := GWslCount > 0;
+
+  SetText(LblDockerInfo, DockerInfo);
+  DockerWhyParts(WherePage, Why, Help);
+  SetReason(LblDockerWhy, LblDockerHelp, Why, Help);
   SetText(LblFolderInfo, 'n8n and everything it needs are placed in one folder, so nothing else on the computer is touched. ' +
     'Nothing has to be installed first. Stays on n8n 2.x.');
+  SetText(LblGlobalInfo, GlobalInfo);
+  GlobalWhyParts(WherePage, Why, Help);
+  SetReason(LblGlobalWhy, LblGlobalHelp, Why, Help);
+  SetText(LblWslInfo, WslInfo);
+  WslWhyParts(WherePage, Why, Help);
+  SetReason(LblWslWhy, LblWslHelp, Why, Help);
 
-  RbGlobal.Enabled := GNodeOk;
-  SetText(LblGlobalInfo, 'Adds n8n to the Node.js that is already installed, so the n8n command works in every terminal. Needs Node.js 22. Stays on n8n 2.x. ' +
-    GlobalNote);
-
-  RbWsl.Enabled := GWslCount > 0;
-  SetText(LblWslInfo, 'Installs n8n inside a Linux distribution you already have in WSL2, with Linux file speed. Stays on n8n 2.x. ' + WslNote);
-
-  // Lay the descriptions out again, as their heights have changed.
-  LblDockerInfo.Top := Below(RbDocker, 1);
-  RbFolder.Top := Below(LblDockerInfo, 8);
-  LblFolderInfo.Top := Below(RbFolder, 1);
-  RbGlobal.Top := Below(LblFolderInfo, 8);
-  LblGlobalInfo.Top := Below(RbGlobal, 1);
-  RbWsl.Top := Below(LblGlobalInfo, 8);
-  LblWslInfo.Top := Below(RbWsl, 1);
+  // Lay the page out again, as the heights of the texts have changed. If it does not fit, leave out descriptions.
+  Hide := 0;
+  while (LayoutMethodPage(Hide) - ScaleY(9) > PageMethod.SurfaceHeight) and (Hide < 3) do
+    Hide := Hide + 1;
 
   // Move the choice off an option that cannot be used.
   if (ChosenMethod = MethodDocker) and not DockerReady then ChooseMethod(MethodFolder);
@@ -331,6 +646,8 @@ begin
     SetText(LblPortStatus, 'Enter a number between 1024 and 65534.')
   else if PortInUse(P) then
     SetText(LblPortStatus, 'Another program is already using port ' + IntToStr(P) + '. Choose a different number.')
+  else if GPortProblem <> '' then
+    SetText(LblPortStatus, 'n8n will open at ' + LocalUrl(P) + '   (Setup could not check whether port ' + IntToStr(P) + ' is free: ' + WithoutStop(GPortProblem) + ').')
   else
     SetText(LblPortStatus, 'n8n will open at ' + LocalUrl(P) + '   (port ' + IntToStr(P) + ' is free).');
 end;
@@ -372,7 +689,13 @@ end;
 
 procedure RecheckClick(Sender: TObject);
 begin
+  // Asking Docker can take a while when it is starting up, so the button says that something is going on.
+  BtnRecheck.Caption := 'Checking...';
+  BtnRecheck.Enabled := False;
+  WizardForm.Refresh;
   RunDetection;
+  BtnRecheck.Caption := 'Check again';
+  BtnRecheck.Enabled := True;
 end;
 
 // ---------------------------------------------------------------------------
@@ -380,16 +703,15 @@ end;
 // ---------------------------------------------------------------------------
 
 procedure BuildModePage;
-var
-  Top: Integer;
 begin
   PageMode := CreateCustomPage(wpWelcome, 'How do you want to install n8n?',
     'Express is right for almost everyone. You see a summary before anything is installed.');
-  Top := 0;
-  RbExpress := NewRadio(PageMode, 'Express install (recommended)', Top);
+  RbExpress := NewRadio(PageMode, 'Express install (recommended)', 0);
   RbExpress.Checked := True;
   LblExpressInfo := NewText(PageMode, 'Checking this computer...', 22, Below(RbExpress, 1), False);
-  RbCustom := NewRadio(PageMode, 'Custom install', Below(LblExpressInfo, 24));
+  LblExpressWhy := NewWhy(PageMode, 22);
+  LblExpressHelp := NewHelp(PageMode, 22);
+  RbCustom := NewRadio(PageMode, 'Custom install', Below(LblExpressInfo, 16));
   LblCustomInfo := NewText(PageMode, 'You choose how n8n runs (Docker, Windows or Linux), the folder, the port, and the other settings.', 22, Below(RbCustom, 1), False);
   LblChecking := NewText(PageMode, '', 0, Below(LblCustomInfo, 24), False);
 end;
@@ -408,29 +730,41 @@ begin
   PageMethod := CreateCustomPage(PageMode.ID, 'How should n8n run?',
     'These are four ways of running the same n8n. If you are not sure, keep the suggestion.');
 
+  // Everything is placed by RefreshMethodText once the computer has been looked at, as the texts decide the heights.
   RbDocker := NewRadio(PageMethod, 'Docker', 0);
-  LblDockerInfo := NewText(PageMethod, '', 22, Below(RbDocker, 1), False);
-  RbFolder := NewRadio(PageMethod, 'Windows, in a folder of its own', Below(LblDockerInfo, 8));
+  LblDockerInfo := NewText(PageMethod, '', 22, 0, False);
+  LblDockerWhy := NewWhy(PageMethod, 22);
+  LblDockerHelp := NewHelp(PageMethod, 22);
+  RbFolder := NewRadio(PageMethod, 'Windows, in a folder of its own', 0);
   RbFolder.Checked := True;
-  LblFolderInfo := NewText(PageMethod, '', 22, Below(RbFolder, 1), False);
-  RbGlobal := NewRadio(PageMethod, 'Windows, for this user account', Below(LblFolderInfo, 8));
-  LblGlobalInfo := NewText(PageMethod, '', 22, Below(RbGlobal, 1), False);
-  RbWsl := NewRadio(PageMethod, 'Linux inside Windows (WSL2)', Below(LblGlobalInfo, 8));
-  LblWslInfo := NewText(PageMethod, '', 22, Below(RbWsl, 1), False);
+  LblFolderInfo := NewText(PageMethod, '', 22, 0, False);
+  RbGlobal := NewRadio(PageMethod, 'Windows, for this user account', 0);
+  LblGlobalInfo := NewText(PageMethod, '', 22, 0, False);
+  LblGlobalWhy := NewWhy(PageMethod, 22);
+  LblGlobalHelp := NewHelp(PageMethod, 22);
+  RbWsl := NewRadio(PageMethod, 'Linux inside Windows (WSL2)', 0);
+  LblWslInfo := NewText(PageMethod, '', 22, 0, False);
+  LblWslWhy := NewWhy(PageMethod, 22);
+  LblWslHelp := NewHelp(PageMethod, 22);
 
   RbDocker.OnClick := @MethodClick;
   RbFolder.OnClick := @MethodClick;
   RbGlobal.OnClick := @MethodClick;
   RbWsl.OnClick := @MethodClick;
 
+  // Top right, on the line of the first option, where it never gets in the way of the texts below.
   BtnRecheck := TNewButton.Create(PageMethod);
   BtnRecheck.Parent := PageMethod.Surface;
   BtnRecheck.Caption := 'Check again';
   BtnRecheck.Width := ScaleX(100);
   BtnRecheck.Height := ScaleY(23);
+  if BtnRecheck.Height < ControlHeight then
+    BtnRecheck.Height := ControlHeight;
   BtnRecheck.Left := PageMethod.SurfaceWidth - BtnRecheck.Width;
-  BtnRecheck.Top := PageMethod.SurfaceHeight - BtnRecheck.Height;
+  BtnRecheck.Top := 0;
   BtnRecheck.OnClick := @RecheckClick;
+  RbDocker.Width := BtnRecheck.Left - ScaleX(8);
+  RbDocker.Height := BtnRecheck.Height;
 end;
 
 // ---------------------------------------------------------------------------
@@ -536,9 +870,9 @@ function RequestedMethodProblem: String;
 begin
   Result := '';
   if (GWantedMethod = '') or (ChosenMethod = GWantedMethod) then Exit;
-  if GWantedMethod = MethodDocker then Result := DockerStatusText
-  else if GWantedMethod = MethodGlobal then Result := GlobalNote
-  else if GWantedMethod = MethodWsl then Result := WslNote;
+  if GWantedMethod = MethodDocker then Result := DockerWhy(WhereSilent)
+  else if GWantedMethod = MethodGlobal then Result := GlobalWhy(WhereSilent)
+  else if GWantedMethod = MethodWsl then Result := WslWhy(WhereSilent);
 end;
 
 // Express on a folder that already holds an install of the same kind is an update: it keeps that install's port,

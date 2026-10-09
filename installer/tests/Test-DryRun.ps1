@@ -148,11 +148,24 @@ Test-Case -Name 'folder-with-kept-data' -InstallArgs @('/METHOD=folder') -PreCre
 Test-Case -Name 'folder-with-other-files' -InstallArgs @('/METHOD=folder') -PreCreate @('my notes.txt', '.n8n\config') -ExpectExit 1 `
     -ExpectInLog @('already has other files in it, for example "my notes\.txt"')
 
+# When the look at the ports does not work, nobody is told that a port is free: the log says it was not looked at.
+Test-Case -Name 'folder-port-check-fails' -InstallArgs @('/METHOD=folder', '/FAKENETSTAT="Access is denied."') `
+    -ExpectInLog @('! Setup could not check whether port \d+ \(or any other\) is free: netstat\.exe ended with code 1 and said: Access is denied\.')
+
 # --- the user-account way, with a Node.js that fits and one that does not ---
 Test-Case -Name 'global' -InstallArgs @('/METHOD=global', '/FAKENODE=22.11.0') `
     -ExpectInLog @('npm install -g n8n@2 --allow-scripts=sqlite3')
+
+# A way that cannot be used says why, in the words of what was actually found: the Node.js that is there, or what Node.js
+# said when it did not run. A silent install gets the same sentences as its error message, and nothing is skipped quietly.
 Test-Case -Name 'global-old-node' -InstallArgs @('/METHOD=global', '/FAKENODE=18.0.0') -ExpectExit 1 `
-    -ExpectInLog @('cannot be used')
+    -ExpectInLog @('The install method "global" cannot be used\. Your Node\.js \(18\.0\.0\) is not one that n8n 2\.x is tested with here\.',
+        'Use /METHOD=folder instead')
+Test-Case -Name 'global-no-node' -InstallArgs @('/METHOD=global', '/FAKENODE=') -ExpectExit 1 `
+    -ExpectInLog @('The install method "global" cannot be used\. Node\.js was not found on this computer\.', 'Use /METHOD=folder instead')
+Test-Case -Name 'global-node-fails' -InstallArgs @('/METHOD=global', '/FAKENODEMSG="It ended with code 3 and said: the application failed to start"') -ExpectExit 1 `
+    -ExpectInLog @('Setup could not check Node\.js\. It ended with code 3 and said: the application failed to start\.',
+        'Use /METHOD=folder instead')
 
 # Where npm keeps its global programs decides how the start script runs n8n: from the usual folder inside the user
 # profile it runs the program by its address in %APPDATA%; from anywhere else it relies on the n8n command.
@@ -180,9 +193,24 @@ Test-Case -Name 'docker-own-names' -StopShortcut `
     -UninstallArgs @('/DELETEDATA=1') -UninstallIn @('docker rm -f my-n8n', 'docker volume rm my_data')
 Test-Case -Name 'docker-network' -InstallArgs @('/METHOD=docker', '/FAKEDOCKER=ready', '/LAN=1') -StopShortcut `
     -ExpectInLog @('-p 5678:5678 ', 'N8N_SECURE_COOKIE=false') -ExpectNotInLog @('127\.0\.0\.1:5678:5678')
-Test-Case -Name 'docker-missing' -InstallArgs @('/METHOD=docker', '/FAKEDOCKER=missing') -ExpectExit 1 -ExpectInLog @('cannot be used')
-Test-Case -Name 'docker-stopped' -InstallArgs @('/METHOD=docker', '/FAKEDOCKER=stopped') -ExpectExit 1 -ExpectInLog @('not running')
-Test-Case -Name 'docker-windows-containers' -InstallArgs @('/METHOD=docker', '/FAKEDOCKER=windows') -ExpectExit 1 -ExpectInLog @('Linux containers')
+
+# When Docker cannot be used, the install stops and says why. "said:" is what Docker itself answered (the probe script
+# passes it on), the other messages are what Setup worked out: nothing is left to guess.
+Test-Case -Name 'docker-missing' -InstallArgs @('/METHOD=docker', '/FAKEDOCKER=missing') -ExpectExit 1 `
+    -ExpectInLog @('The install method "docker" cannot be used\. Docker was not found on this computer\.', 'install Docker Desktop from docker\.com')
+Test-Case -Name 'docker-installed-not-found' -InstallArgs @('/METHOD=docker', '/FAKEDOCKER=missing', '/FAKEDOCKERMSG=installed') -ExpectExit 1 `
+    -ExpectInLog @('Docker Desktop is installed, but Setup cannot find its docker\.exe\.', 'Sign out of Windows')
+Test-Case -Name 'docker-stopped' -InstallArgs @('/METHOD=docker', '/FAKEDOCKER=stopped') -ExpectExit 1 `
+    -ExpectInLog @('Docker is installed, but it is not ready\.', 'Start Docker Desktop', 'then run the installer again')
+Test-Case -Name 'docker-stopped-said' -InstallArgs @('/METHOD=docker', '/FAKEDOCKER=stopped', '/FAKEDOCKERMSG="said: error during connect: the pipe docker_engine was not found"') -ExpectExit 1 `
+    -ExpectInLog @('Docker is installed, but it is not ready\. Docker said: error during connect: the pipe docker_engine was not found\.',
+        'Start Docker Desktop', '(?m)^\s+error during connect: the pipe docker_engine was not found\s*$')
+Test-Case -Name 'docker-stopped-no-answer' -InstallArgs @('/METHOD=docker', '/FAKEDOCKER=stopped', '/FAKEDOCKERMSG="Docker did not answer within 15 seconds."') -ExpectExit 1 `
+    -ExpectInLog @('Docker is installed, but it is not ready\. Docker did not answer within 15 seconds\.') -ExpectNotInLog @('Docker said:')
+Test-Case -Name 'docker-check-failed' -InstallArgs @('/METHOD=docker', '/FAKEDOCKER=error', '/FAKEDOCKERMSG="The check printed nothing and ended with code 1."') -ExpectExit 1 `
+    -ExpectInLog @('Setup could not find out whether Docker is ready\. The check printed nothing and ended with code 1\.', 'to try once more')
+Test-Case -Name 'docker-windows-containers' -InstallArgs @('/METHOD=docker', '/FAKEDOCKER=windows') -ExpectExit 1 `
+    -ExpectInLog @('Docker is set to Windows containers, and n8n needs Linux containers\.', 'Switch it to Linux containers')
 
 # --- when a program fails, the install stops with a message and an error code ---
 Test-Case -Name 'failing-program' -InstallArgs @('/METHOD=folder') -DryRunSwitch '/DRYRUN=fail' -ExpectExit 3 `
@@ -248,8 +276,15 @@ Test-Case -Name 'wsl-unknown-distro' -InstallArgs @('/METHOD=wsl', $fakeWsl, '/W
     -ExpectInLog @('"Nope" was not found in WSL')
 Test-Case -Name 'wsl-name-with-space' -InstallArgs @('/METHOD=wsl', '/FAKEWSL="My Distro|2|Running"', '/WSLDISTRO="My Distro"') -ExpectExit 1 `
     -ExpectInLog @('The Linux distribution "My Distro" has a name with spaces')
+# Without a Linux distribution the install stops and says why: that WSL is not there at all, that it listed none (with
+# what it said, when it said something), or that the check did not work.
 Test-Case -Name 'wsl-no-distro' -InstallArgs @('/METHOD=wsl', '/FAKEWSL=') -ExpectExit 1 `
-    -ExpectInLog @('No Linux distribution is set up in WSL')
+    -ExpectInLog @('The install method "wsl" cannot be used\. WSL did not list a Linux distribution\.', 'wsl --install -d Ubuntu')
+Test-Case -Name 'wsl-said' -InstallArgs @('/METHOD=wsl', '/FAKEWSL=', '/FAKEWSLMSG="WSL said: The Windows Subsystem for Linux has no installed distributions."') -ExpectExit 1 `
+    -ExpectInLog @('WSL did not list a Linux distribution\. WSL said: The Windows Subsystem for Linux has no installed distributions\.',
+        'wsl --install -d Ubuntu')
+Test-Case -Name 'wsl-exe-missing' -InstallArgs @('/METHOD=wsl', '/FAKEWSLEXE=missing') -ExpectExit 1 `
+    -ExpectInLog @('WSL is not installed on this computer\.', 'wsl --install -d Ubuntu', 'wsl\.exe is not on this computer')
 Test-Case -Name 'wsl-failing-program' -InstallArgs @('/METHOD=wsl', $fakeWsl, '/WSLDISTRO=Ubuntu') -DryRunSwitch '/DRYRUN=fail' -ExpectExit 3 `
     -ExpectInLog @('FAILED: npm could not install n8n inside Ubuntu')
 

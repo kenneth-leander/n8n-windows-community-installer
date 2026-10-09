@@ -15,6 +15,16 @@ One window, four ways of running n8n (the same four the `.bat` had):
 *Express* picks Docker when Docker is running and the folder install otherwise. *Custom* lets you choose
 the way, folder, port, whether other devices on the network may connect, and the Docker settings.
 
+### When a way cannot be used
+
+A way that cannot be used is greyed out, and a highlighted line under it says why, followed by what to do about it.
+The reason is what was actually found, in the words of the program that was asked: what Docker said when it did not
+answer, which Node.js version is installed, what WSL printed when it listed no Linux distribution. When a check
+itself does not work (PowerShell cannot be started, a program prints something nobody expected, a program does not
+answer within 15 seconds), that is said as well. Nothing is skipped quietly: even the check whether a port is free
+says so when it could not look, instead of saying the port is free. *Check again* asks again, for example after
+Docker Desktop has been started. A silent install gets the same sentences as its error message and in the log.
+
 ## What gets installed
 
 Everything goes into one install folder (default `%LOCALAPPDATA%\Programs\n8n`, `n8n-docker`, `n8n-global`
@@ -112,7 +122,8 @@ code\               the wizard and the install logic, one file per part (Inno Se
 scripts\            PowerShell helpers that ship inside the installer
 templates\          the launchers and the notes that are written into the install folder
 assets\             icon and wizard pictures
-tests\              Test-Install.ps1, the end to end test that CI runs
+tests\              Test-Install.ps1 (the end to end test), Test-DryRun.ps1 (every way, in test mode),
+                    Test-Helpers.ps1 (the PowerShell helpers against stand-ins for Docker and WSL)
 ```
 
 ## Testing
@@ -121,6 +132,9 @@ tests\              Test-Install.ps1, the end to end test that CI runs
   for the folder way and for the user-account way: install, start n8n, wait until it answers, stop it,
   install again over it (the data must stay), uninstall (keep the data), install, uninstall and delete the data.
   It also runs the PowerShell helpers on Windows PowerShell 5.1 and asks Docker Hub for the n8n versions.
+  `tests\Test-Helpers.ps1` runs the two helpers that ask Docker and WSL what they are doing against stand-ins for
+  `docker.exe` and `wsl.exe` that work, complain, print nonsense, fail without a word or never answer, and checks
+  that each case gives a line that says what happened.
   The test installs on drive D: and keeps npm's download cache there: the system drive (C:) of GitHub's Windows
   computers is so slow for the thousands of small files npm writes that n8n needs more than 20 minutes to install
   on it (with or without this installer), against about 6 minutes on D:. While the installer runs, the test says
@@ -132,8 +146,12 @@ tests\              Test-Install.ps1, the end to end test that CI runs
   `powershell -File installer\tests\Test-Install.ps1 -Installer .\n8n-Installer.exe -Method docker -Dir C:\n8n-test-docker`
   (or `-Method wsl -WslDistro Ubuntu`), and click through the wizard once.
 * **Test mode.** `/DRYRUN` walks through an install without changing anything (the install folder only gets the
-  uninstaller and a note about the install, so the uninstaller can be tried). With it, `/FAKEDOCKER=ready|windows|stopped|missing`,
-  `/FAKENODE=22.11.0` and `/FAKEWSL="Ubuntu|2|Running;Debian|1|Stopped"` pretend to have found those things,
+  uninstaller and a note about the install, so the uninstaller can be tried). With it, `/FAKEDOCKER=ready|windows|stopped|missing|error`,
+  `/FAKENODE=22.11.0` (`/FAKENODE=` alone: no Node.js) and `/FAKEWSL="Ubuntu|2|Running;Debian|1|Stopped"` (`/FAKEWSL=` alone:
+  no distribution, `/FAKEWSLEXE=missing`: no `wsl.exe`) pretend to have found those things. The reasons that go with
+  a way that cannot be used are tried with `/FAKEDOCKERMSG="said: <what Docker said>"` (or a sentence of our own, or
+  `installed` for a Docker Desktop that Windows has not told this program about), `/FAKENODEMSG="<what Node.js said>"`,
+  `/FAKEWSLMSG="<what WSL said>"` and `/FAKENETSTAT="<what netstat said>"`.
   `/DRYRUN=fail` makes every program the installer would start fail, `/SLOW=3` makes every step take 3 seconds, and
   `/SHOWFILES` prints the start script and the notes it would write, with every setting filled in. For the WSL2 way
   they also pretend what Linux answers: `/FAKEWSLUSER=ken` (or `root`), `/FAKEWSLOS=ubuntu` (`fedora`, `alpine`, ...),

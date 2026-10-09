@@ -26,6 +26,63 @@ begin
   Result := (T = '1') or (T = 'true') or (T = 'yes') or (T = 'on');
 end;
 
+// A piece of text for a message: on one line, and no longer than Max characters. When it has to be cut, the end is kept
+// (from the start of a word), as that is where a program says what is wrong.
+function EndOf(const S: String; const Max: Integer): String;
+var
+  N, Limit: Integer;
+begin
+  Result := Trim(ReplaceAll(ReplaceAll(S, #13, ' '), #10, ' '));
+  if Length(Result) <= Max then Exit;
+  N := Length(Result) - Max + 4;
+  Limit := N + Max div 3;
+  while (N < Limit) and (Result[N - 1] <> ' ') do
+    N := N + 1;
+  Result := '...' + Copy(Result, N, Length(Result));
+end;
+
+// A piece of text for a message, cut to Max characters at the end of a word, with ... where something was left out.
+// Used where the beginning says it best.
+function StartOf(const S: String; const Max: Integer): String;
+var
+  N: Integer;
+begin
+  Result := Trim(ReplaceAll(ReplaceAll(S, #13, ' '), #10, ' '));
+  if Length(Result) <= Max then Exit;
+  N := Max - 3;
+  while (N > Max div 2) and (Result[N + 1] <> ' ') do
+    N := N - 1;
+  Result := Copy(Result, 1, N) + '...';
+end;
+
+// Two pieces of text with one space between them (none when one of them is empty).
+function JoinText(const A, B: String): String;
+begin
+  if A = '' then Result := B
+  else if B = '' then Result := A
+  else Result := A + ' ' + B;
+end;
+
+// The text with a full stop at the end, unless it already ends like a sentence.
+function AsSentence(const S: String): String;
+var
+  C: Char;
+begin
+  Result := Trim(S);
+  if Result = '' then Exit;
+  C := Result[Length(Result)];
+  if (C <> '.') and (C <> '!') and (C <> '?') then
+    Result := Result + '.';
+end;
+
+// The text without the full stop at its end, for when it goes inside brackets.
+function WithoutStop(const S: String): String;
+begin
+  Result := Trim(S);
+  if (Result <> '') and (Result[Length(Result)] = '.') then
+    Delete(Result, Length(Result), 1);
+end;
+
 // Remove one trailing backslash, unless the path is just a drive root like C:\
 function CutBackslash(const S: String): String;
 begin
