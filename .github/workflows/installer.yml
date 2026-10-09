@@ -120,9 +120,17 @@ jobs:
             if ($name -eq 'docker-probe' -and "$out" -notmatch '^(ready|windows|stopped|missing)(\|.*)?$') { throw "docker-probe.ps1 printed something unexpected" }
           }
 
+      # The system drive (C:) of GitHub's Windows computers is very slow for the many small files npm writes: n8n takes
+      # more than 20 minutes to install there and about 6 minutes on drive D: (where RUNNER_TEMP is). So the test
+      # installs and keeps npm's download cache on drive D:. On an ordinary PC this makes no difference.
+      - name: Use the fast drive for the test
+        shell: pwsh
+        run: |
+          "npm_config_cache=$env:RUNNER_TEMP\npm-cache" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Install, start, update and uninstall
         shell: pwsh
-        run: ./installer/tests/Test-Install.ps1 -Installer dist\n8n-Installer.exe -Method folder -Dir C:\n8n-ci-folder
+        run: ./installer/tests/Test-Install.ps1 -Installer dist\n8n-Installer.exe -Method folder -Dir "$env:RUNNER_TEMP\n8n-ci-folder"
 
       - name: Collect logs
         if: always()
@@ -154,9 +162,19 @@ jobs:
           name: n8n-installer
           path: dist
 
+      # Same reason as in the folder test: npm's global folder and its download cache go to drive D: (GitHub's
+      # computers keep both on drive C: by default). The folder is added to the PATH, so the n8n command is found.
+      - name: Use the fast drive for the test
+        shell: pwsh
+        run: |
+          Write-Host "npm settings of this computer: global folder $(npm prefix -g), cache $(npm config get cache)"
+          "npm_config_cache=$env:RUNNER_TEMP\npm-cache" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "npm_config_prefix=$env:RUNNER_TEMP\npm-global" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "$env:RUNNER_TEMP\npm-global" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
       - name: Install, start, update and uninstall
         shell: pwsh
-        run: ./installer/tests/Test-Install.ps1 -Installer dist\n8n-Installer.exe -Method global -Dir C:\n8n-ci-global -Port 5689
+        run: ./installer/tests/Test-Install.ps1 -Installer dist\n8n-Installer.exe -Method global -Dir "$env:RUNNER_TEMP\n8n-ci-global" -Port 5689
 
       - name: Collect logs
         if: always()

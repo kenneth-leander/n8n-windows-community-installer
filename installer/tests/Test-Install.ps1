@@ -203,6 +203,10 @@ function Stop-N8n($proc) {
 }
 
 # ---------------------------------------------------------------------------
+if ($Method -eq 'global') {
+    $prefixText = (Invoke-Native { & npm.cmd prefix -g } | Out-String).Trim()
+    Write-Host "npm puts global packages in: $prefixText (its download cache: $((Invoke-Native { & npm.cmd config get cache } | Out-String).Trim()))"
+}
 Say "1. Install ($Method) into $Dir"
 if ((Invoke-Setup 'install1' @()) -ne 0) { Stop-Here 'The installer did not finish (see the logs above).' }
 Check (Test-Path "$Dir\start-n8n.cmd") 'start-n8n.cmd was written'

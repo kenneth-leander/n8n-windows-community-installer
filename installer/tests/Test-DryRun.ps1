@@ -23,6 +23,13 @@ function Check([bool]$ok, [string]$what) {
     else { Write-Host "  FAIL  $what"; $script:problems += $what }
 }
 
+# Runs a block with an environment variable set (programs it starts get it too) and puts the old value back afterwards.
+function Invoke-WithEnv([string]$name, [string]$value, [scriptblock]$block) {
+    $saved = [Environment]::GetEnvironmentVariable($name, 'Process')
+    [Environment]::SetEnvironmentVariable($name, $value, 'Process')
+    try { & $block } finally { [Environment]::SetEnvironmentVariable($name, $saved, 'Process') }
+}
+
 # The entry of an install folder in Windows Settings, Apps.
 function Get-UninstallEntry([string]$dir) {
     $root = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall'
@@ -123,6 +130,17 @@ Test-Case -Name 'global' -InstallArgs @('/METHOD=global', '/FAKENODE=22.11.0') `
     -ExpectInLog @('npm install -g n8n@2 --allow-scripts=sqlite3')
 Test-Case -Name 'global-old-node' -InstallArgs @('/METHOD=global', '/FAKENODE=18.0.0') -ExpectExit 1 `
     -ExpectInLog @('cannot be used')
+
+# Where npm keeps its global programs decides how the start script runs n8n: from the usual folder inside the user
+# profile it runs the program by its address in %APPDATA%; from anywhere else it relies on the n8n command.
+Invoke-WithEnv 'npm_config_prefix' (Join-Path $env:APPDATA 'npm') {
+    Test-Case -Name 'global-usual-folder' -InstallArgs @('/METHOD=global', '/FAKENODE=22.11.0') `
+        -ExpectInLog @('call node "%APPDATA%\\npm\\node_modules\\n8n\\bin\\n8n" start')
+}
+Invoke-WithEnv 'npm_config_prefix' (Join-Path $work 'npm-elsewhere') {
+    Test-Case -Name 'global-other-folder' -InstallArgs @('/METHOD=global', '/FAKENODE=22.11.0') `
+        -ExpectInLog @('call n8n start') -ExpectNotInLog @('call node "%APPDATA%')
+}
 
 # --- Docker -----------------------------------------------------------------
 Test-Case -Name 'docker' -InstallArgs @('/METHOD=docker', '/FAKEDOCKER=ready') -StopShortcut `
