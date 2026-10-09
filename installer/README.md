@@ -98,13 +98,17 @@ tests\              Test-Install.ps1, the end to end test that CI runs
   for the folder way and for the user-account way: install, start n8n, wait until it answers, stop it,
   install again over it (the data must stay), uninstall (keep the data), install, uninstall and delete the data.
   It also runs the PowerShell helpers on Windows PowerShell 5.1 and asks Docker Hub for the n8n versions.
-* **Docker and WSL2 cannot run on GitHub's computers.** Test them by hand on a computer that has them:
+* **Docker and WSL2 cannot run on GitHub's computers.** There, `tests\Test-DryRun.ps1` runs the installer and the
+  uninstaller in test mode for every way and checks which commands they would start (the Docker command line,
+  the names, the ports, what is removed again). To test them for real, use a computer that has them:
   `powershell -File installer\tests\Test-Install.ps1 -Installer .\n8n-Installer.exe -Method docker -Dir C:\n8n-test-docker`
   (or `-Method wsl -WslDistro Ubuntu`), and click through the wizard once.
-* **Test mode.** `/DRYRUN` walks through an install without changing anything. With it, `/FAKEDOCKER=ready|windows|stopped|missing`,
+* **Test mode.** `/DRYRUN` walks through an install without changing anything (the install folder only gets the
+  uninstaller and a note about the install, so the uninstaller can be tried). With it, `/FAKEDOCKER=ready|windows|stopped|missing`,
   `/FAKENODE=22.11.0` and `/FAKEWSL="Ubuntu|2|Running;Debian|1|Stopped"` pretend to have found those things,
   `/DRYRUN=fail` makes every program the installer would start fail, and `/SLOW=3` makes every step take 3 seconds.
-  These are only honoured together with `/DRYRUN`.
+  These are only honoured together with `/DRYRUN`. The uninstaller takes `/DRYRUN` as well: it then says which
+  programs it would start (like `docker rm`) and starts none.
 
 ## Signing
 

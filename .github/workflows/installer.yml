@@ -2,7 +2,8 @@ name: Installer
 
 # Builds the Windows installer (installer/n8n-installer.iss) with Inno Setup and tests it on real
 # Windows computers. Docker and WSL2 installs cannot run on GitHub's computers (no Linux containers,
-# no WSL2), so those two are tested by hand: see installer/README.md.
+# no WSL2), so for those two the installer is run in test mode (/DRYRUN) to check which commands it
+# would run; the real thing is tested by hand: see installer/README.md.
 
 on:
   push:
@@ -161,6 +162,22 @@ jobs:
           name: logs-test-global
           path: ${{ runner.temp }}/ci-logs
           if-no-files-found: ignore
+
+  test-every-way:
+    name: Test every way in test mode (Windows)
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: n8n-installer
+          path: dist
+
+      - name: Docker, Linux (WSL2) and the rest, without installing anything
+        shell: pwsh
+        run: ./installer/tests/Test-DryRun.ps1 -Installer dist\n8n-Installer.exe
 
   test-docker-tag:
     name: Test the Docker version lookup
