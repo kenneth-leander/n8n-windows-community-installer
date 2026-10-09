@@ -381,7 +381,7 @@ var
   Top: Integer;
 begin
   PageMode := CreateCustomPage(wpWelcome, 'How do you want to install n8n?',
-    'Express is right for almost everyone. You can still change things on the last screen.');
+    'Express is right for almost everyone. You see a summary before anything is installed.');
   Top := 0;
   RbExpress := NewRadio(PageMode, 'Express install (recommended)', Top);
   RbExpress.Checked := True;

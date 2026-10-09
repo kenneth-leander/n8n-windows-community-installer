@@ -48,7 +48,13 @@ begin
   Inc(GLineCount);
   RememberLine(S);
   if GQuiet then
-    FileLog('  ' + S)
+  begin
+    // npm prints hundreds of lines. They go to the log file; the wizard shows the latest one, so it is clear that
+    // something is happening.
+    FileLog('  ' + S);
+    if (Trim(S) <> '') and GWizardReady then
+      WizardForm.FilenameLabel.Caption := Copy(Trim(S), 1, 100);
+  end
   else
     LogLine('  ' + S);
 end;
