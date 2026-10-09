@@ -7,6 +7,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-10-09
+
+### Fixed
+
+- **Native and WSL2 installs work with current n8n again.** n8n 2.36.0 (August 2026) raised its requirement to Node.js 24. The 0.2 installer accepted Node.js 20.19 and 22 and blocked 24, so a fresh native or WSL2 install ended up on n8n 2.35.7, the last release that runs on Node.js 22, and the update check in the start script could never move it forward, because npm will not install a newer n8n on Node.js 22. The manual `n8n@latest` update commands in the 0.2 README did install a newer n8n, which then exits with "Your Node.js version is currently not supported by n8n". That slipped through because `n8n --version` still works on an unsupported Node.js. Global, folder and WSL2 installs now require Node.js 24.x, and the WSL2 offer to install Node.js inside the distribution installs Node.js 24 (nvm, or NodeSource on apt and dnf distributions). Node.js 25 and 26 stay blocked, because some of n8n's native modules (`isolated-vm`, `@confluentinc/kafka-javascript`) have no prebuilt Windows binary for them and npm would try to compile them
+- **Folder installs no longer pass `--allow-scripts` on the command line.** npm 11.19 and newer, including the npm that ships with Node.js 24, reject that flag in a project install with `EALLOWSCRIPTS`. The `sqlite3` allowance now lives in an `allow-scripts=sqlite3` line in a `.npmrc` file in the install folder, which npm 12 needs and older npm ignores, and the start script's update command no longer passes the flag. Global and WSL2 installs keep the flag, because npm accepts it there
+
+### Changed
+
+- **Every install method is pinned to n8n 2.x**, ahead of n8n 3.0, which is Docker-only and no longer ships a runnable npm package:
+  - Global, folder and WSL2 installs run `npm install n8n@2`, so they stay on 2.x whatever npm's `latest` tag becomes
+  - The update check in generated start scripts installs `n8n@2` and ignores a newer major version if one is ever published. Start scripts made by 0.2 keep their old behaviour until the installer is run again
+  - Docker installs no longer pull the moving `latest` image, which moves to 3.0 once it is released. Docker has no floating 2.x tag, so the installer asks Docker Hub which exact 2.x release the `stable` tag points to and installs that tag. If the lookup fails it falls back to `2.42.5` and says so. The completion screen shows the installed version, and the generated `README.txt` explains how to update without jumping to 3.0
+- npm 11, the line bundled with Node.js 24, is left as it is, instead of being capped at `10.x`. The installer only flags npm 12 or newer, which blocks dependency install scripts and leaves `sqlite3` without its native binary, and offers to install the newest npm 11 instead
+- Node.js download hints now say to pick version 24, because Node.js 26 is expected to become the default LTS download on nodejs.org soon and this installer does not accept it yet
+- `README.md`: new 0.2.1 section, Node.js and npm requirements, update instructions, troubleshooting and the n8n 3.0 notice are updated. 3.0 support is now described as arriving with the new installer, since this version installs 2.x only
+
 ## [0.2] - 2026-08-06
 
 ### Changed

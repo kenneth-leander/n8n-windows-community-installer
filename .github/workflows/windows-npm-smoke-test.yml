@@ -1,0 +1,45 @@
+name: Windows npm smoke test
+
+# Installs n8n with npm on a real Windows machine, the way n8n-Installer.bat does,
+# then starts it and checks that it answers. Each job states what it expects, so a
+# green check means the Node.js rules in the installer still match what n8n does.
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/windows-npm-smoke-test.yml"
+      - ".github/scripts/smoke-test.ps1"
+      - "n8n-Installer.bat"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-test:
+    name: ${{ matrix.mode }} install on Node.js ${{ matrix.node }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      # GitHub's Windows runners ship with Visual Studio Build Tools and Python, which most
+      # Windows PCs do not have. Pointing node-gyp at a Visual Studio version that does not
+      # exist makes every native module without a prebuilt binary fail here, as it does on a normal PC.
+      npm_config_msvs_version: "2099"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { node: "24", mode: folder, expect: ok }
+          - { node: "24", mode: global, expect: ok }
+          - { node: "24", mode: folder-cli-flag, expect: fail }
+          - { node: "22", mode: folder, expect: old }
+          - { node: "25", mode: folder, expect: fail }
+          - { node: "26", mode: folder, expect: fail }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Install n8n, start it, check that it answers
+        shell: pwsh
+        run: ./.github/scripts/smoke-test.ps1 -Mode ${{ matrix.mode }} -Expect ${{ matrix.expect }}

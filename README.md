@@ -3,7 +3,7 @@
 An unofficial, community-created installation wizard for [n8n](https://n8n.io) on Windows systems.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.2-blue.svg)](https://github.com/web3Leander/n8n-windows-community-installer)
+[![Version](https://img.shields.io/badge/version-0.2.1-blue.svg)](https://github.com/web3Leander/n8n-windows-community-installer)
 
 > **IMPORTANT DISCLAIMER**
 >
@@ -16,6 +16,20 @@ An unofficial, community-created installation wizard for [n8n](https://n8n.io) o
 > - [n8n Documentation](https://docs.n8n.io)
 >
 > For issues with this installer, please open an issue in this repository.
+
+## What's New in 0.2.1 - Works With Current n8n Again
+
+**n8n now needs Node.js 24, and this release catches the installer up.**
+
+Since n8n 2.36 (August 2026), n8n refuses to start on anything older than Node.js 24. Version 0.2 only accepted Node.js 20.19 and 22, so a native or WSL2 install ended up on n8n 2.35.7, the last release that runs on Node.js 22, and the update check could never move it forward. The manual `npm install -g n8n@latest` command from the 0.2 README installed a newer n8n that would not start at all. Docker installs were not affected by the Node.js change.
+
+- **Node.js 24 LTS is now the supported version** for global npm, folder npm and WSL2 installs. The WSL2 option that installs Node.js for you now installs Node.js 24
+- **Folder installs work with current npm.** npm 11.19 and newer reject `--allow-scripts` on the command line in a folder install, so the installer now puts that setting in a `.npmrc` file inside the install folder. npm 11 is left alone, and the installer only offers to move you back from npm 12 or newer
+- **Every install method stays on n8n 2.x.** npm installs use `n8n@2`, the update check in the generated start scripts never offers a 3.x version, and Docker installs pull an exact 2.x image tag instead of `latest`
+- **Docker installs show the exact version** they installed, and the generated `README.txt` explains how to update without jumping to n8n 3.0
+- **n8n 3.0 is not supported yet.** It will arrive with the new installer. See the [n8n 3.0 Notice](#n8n-30-notice)
+
+Installed with 0.2 and n8n will not start? See [Troubleshooting](#troubleshooting).
 
 ## What's New in 0.2 - WSL2 Support Has Landed
 
@@ -35,7 +49,7 @@ Existing Options 1, 2 and 3 are completely unchanged. If you don't have WSL inst
 
 ## Quick Navigation
 
-[What's New](#whats-new-in-02---wsl2-support-has-landed) •
+[What's New](#whats-new-in-021---works-with-current-n8n-again) •
 [Overview](#overview) •
 [Features](#features) •
 [System Requirements](#system-requirements) •
@@ -65,13 +79,14 @@ It is designed for local development, personal automation, and small Windows-hos
 - **Guided WSL2 distribution selection**
   - Detects installed WSL distributions (Ubuntu, Debian, Alpine, Fedora, Arch, openSUSE, etc.)
   - Auto-probes package managers, Linux users, and existing n8n installations inside WSL
-  - Offers Node.js 22 LTS provisioning inside WSL, and never installs it for you without asking
+  - Offers Node.js 24 LTS provisioning inside WSL, and never installs it for you without asking
   - Enforces native Linux filesystem storage (`/home/<user>/.n8n`) to eliminate NTFS file-locking latency
 
 - **n8n 2.x compatibility checks**
-  - Native installs require Node.js `20.19+` or `22.x LTS`
-  - npm is capped at `10.x`, the version bundled with Node.js 22 LTS
-  - Newer release lines are blocked before `npm install`
+  - Native and WSL2 installs require Node.js `24.x`, which n8n 2.36 and newer need
+  - npm 11, the version bundled with Node.js 24 LTS, is used as it is. npm 12 or newer is flagged because it blocks the install script `sqlite3` needs
+  - Other Node.js release lines are blocked before `npm install`
+  - Every install method stays on n8n 2.x: npm installs use `n8n@2` and Docker installs use an exact 2.x image tag
   - Docker installs avoid forcing external task-runner flags and let n8n use its default runner behavior
 
 - **Guided setup and safety checks**
@@ -102,12 +117,16 @@ It is designed for local development, personal automation, and small Windows-hos
 
 ### Native npm requirements
 
-- **Node.js:** `20.19+` or `22.x LTS` from [nodejs.org](https://nodejs.org/), with `22.x LTS` recommended
-- **npm:** `10.x`, as bundled with Node.js 22 LTS
+- **Node.js:** `24.x` LTS from [nodejs.org](https://nodejs.org/en/download). Pick version 24 on the download page
+- **npm:** `11.x`, as bundled with Node.js 24 LTS
 - **Disk space:** At least 2 GB free on the target drive
 - **Administrator rights:** Optional, but recommended for global installs and all-users shortcuts
 
-Avoid Node.js 24 and newer for native npm installs. Node.js and npm ship as one package, and newer Node.js lines bundle newer npm. npm 12 blocks dependency install scripts by default, which leaves `sqlite3` without its native binary and stops n8n from opening its database. Node.js 22 LTS with npm 10 is the pairing this installer targets.
+Use Node.js 24 specifically, not an older or newer release line:
+
+- n8n 2.36 and newer need Node.js 24 or later. On Node.js 22, npm can only install n8n 2.35.7.
+- Some of n8n's native modules (`isolated-vm` and `@confluentinc/kafka-javascript`) ship Windows binaries for Node.js 24 but not for Node.js 25 or 26. npm then tries to compile them on your PC, which fails unless Visual Studio build tools and Python are installed. Node.js 26 is expected to become the default LTS download on nodejs.org soon, which is why the instructions ask you to pick version 24 on the download page.
+- npm 12 and newer blocks dependency install scripts by default, which leaves `sqlite3` without its native binary and stops n8n from opening its database. Node.js 24 ships npm 11, so only a manual upgrade gets you to npm 12. npm prints a hint to upgrade to it after installs, and you should ignore that hint.
 
 ### Docker requirements
 
@@ -127,7 +146,7 @@ If WSL is enabled, the installer will automatically detect your Linux distributi
 ## Quick Start
 
 1. Download `n8n-Installer.bat`.
-2. Install Node.js `22.x LTS` for native Windows npm installs, or start Docker Desktop / enable WSL2.
+2. Install Node.js `24.x` LTS (pick version 24 on the [download page](https://nodejs.org/en/download)) for native Windows npm installs, or start Docker Desktop / enable WSL2.
 3. Right-click `n8n-Installer.bat` and choose **Run as Administrator** when using global installs or all-users shortcuts.
 4. Follow the prompts and confirm the final summary.
 5. Start n8n with the generated `start_n8n.bat`, `start_n8n_wsl.bat`, Docker Desktop, or the Docker/WSL command shown in the generated `README.txt`.
@@ -139,31 +158,33 @@ If WSL is enabled, the installer will automatically detect your Linux distributi
 | **Best For** | System-wide CLI availability on Windows | Isolated instances & side-by-side testing | Containerized, clean runtime | Native Linux speed & SQLite performance |
 | **Command** | `n8n start` | `start_n8n.bat` (or `npx n8n start`) | `docker start <container-name>` | `start_n8n_wsl.bat` |
 | **Isolation** | Shared system Node environment | Local folder `node_modules` | Isolated Docker volume & image | Isolated Linux distribution (`~/.n8n`) |
-| **Updates** | `npm update -g n8n` | `npm update n8n` | Pull latest image & restart container | Update check built into `start_n8n_wsl.bat` |
+| **Updates** | `npm install -g n8n@2` | `npm install n8n@2` | Re-run the installer, or pull a newer 2.x image & recreate the container | Update check built into `start_n8n_wsl.bat` |
 
 ### Global Installation
 
-Uses `npm install -g n8n`.
+Uses `npm install -g n8n@2`.
 
 - Best when you want the `n8n` command available from any terminal
 - Creates the launcher and generated README under `%USERPROFILE%\n8n`
 - Can detect and confirm before replacing an existing global n8n package
-- Supports optional start-time update checks with `npm update -g n8n`
+- Supports optional start-time update checks with `npm install -g n8n@2`
 
 ### Folder-Specific Installation
 
-Uses `npm install n8n` inside a folder you choose.
+Uses `npm install n8n@2` inside a folder you choose.
 
 - Best for isolated installs, testing, and multiple side-by-side instances
 - Keeps the package, launcher, generated README, and data base path together
 - Adds the folder's `node_modules\.bin` path to the current user's PATH
-- Supports optional start-time update checks with `npm update n8n`
+- Writes `allow-scripts=sqlite3` to a `.npmrc` file in the folder, which npm 12 needs and older npm ignores
+- Supports optional start-time update checks with `npm install n8n@2`
 
 ### Docker Installation
 
 Creates a Docker volume, pulls the official n8n image, and starts one container.
 
 - Best when you want a containerized n8n runtime
+- Installs an exact n8n 2.x image tag, the one Docker Hub's `stable` tag points to (for example `2.42.5`), instead of the moving `latest` tag, so the container never jumps to n8n 3.0 on its own
 - Lets you choose the container name and Docker volume name
 - Auto-detects the Windows timezone and maps common zones to IANA names
 - Maps your chosen Windows port to container port `5678`
@@ -177,7 +198,7 @@ Installs n8n inside your chosen WSL Linux distribution (Ubuntu, Debian, Alpine, 
 
 - Best when you want **maximum SQLite performance** and zero Windows npm path/locking quirks
 - Auto-probes the Linux default user and package manager family (`apt`, `apk`, `dnf`, `pacman`, `zypper`)
-- Applies the same Node.js rule as native installs (`20.19+` or `22.x LTS`), and if the distro's Node.js does not match it explains the situation and lets you choose
+- Applies the same Node.js rule as native installs (`24.x`), and if the distro's Node.js does not match it explains the situation and lets you choose
 - Installs as `root` only when npm's prefix is a system path; if Node.js is managed inside your home folder (for example nvm) it installs as your own user so your Node.js tree is never left root-owned
 - Keeps all n8n data on native Linux storage in the distro's home folder (`<home>/.n8n`, usually `/home/<user>/.n8n`), via `N8N_USER_FOLDER=<home>`
 - Creates `start_n8n_wsl.bat` under `%USERPROFILE%\n8n-wsl`
@@ -225,9 +246,11 @@ Exposing a WSL2 instance to your LAN needs a `netsh interface portproxy` rule as
 As detailed in the official [n8n v3.0 Breaking Changes documentation](https://docs.n8n.io/changelog/v30-breaking-changes), n8n v3.0 (scheduled for October 2026) introduces major deployment updates:
 
 - **Docker-based deployment required:** Self-hosted n8n v3.0 will require a Docker deployment. Native installations running directly via `npm` / `npx n8n` will no longer be supported by n8n GmbH in v3.0.
+- **What this version does:** Version 0.2.1 installs **n8n v2.x only**, with every install method. It does not install 3.0 and its update checks never offer it, so the release of 3.0 cannot break an installation made with it.
 - **Installer Support Strategy:**
-  - **Docker installations:** This installer will support **n8n v3.0** in addition to **n8n v2.x**.
-  - **Native installations (Global & Folder npm):** Will remain available and dedicated to **n8n v2.x** releases.
+  - **Docker installations:** **n8n v3.0** support comes with the new installer described in the [Roadmap](#roadmap), in addition to **n8n v2.x**.
+  - **Native installations (Global, Folder npm and WSL2):** Will remain available and dedicated to **n8n v2.x** releases.
+- **Installed with 0.2 and have update checks on?** The start scripts that 0.2 generated do not have the 2.x guard. Decline any update prompt that offers a 3.x version, or run this installer again to regenerate the start script.
 
 ## Security & Task Runners
 
@@ -270,7 +293,7 @@ n8n stores workflows, credentials, settings, the local database, and the encrypt
 
 ### Docker installed files
 
-- One Docker container running `docker.n8n.io/n8nio/n8n`
+- One Docker container running `docker.n8n.io/n8nio/n8n` at an exact 2.x tag
 - One Docker volume mounted to `/home/node/.n8n`
 - Port mapping from your selected Windows port to container port `5678`
 - A generated `README.txt` in the installer folder with container and volume details
@@ -377,23 +400,27 @@ wsl -d <distro> --exec sh -c "ss -tulpn | grep <port>"
 Native start scripts can optionally check for updates each time they run. You can also update manually:
 
 ```bash
-npm install -g n8n@latest
+npm install -g n8n@2
 ```
 
 For folder installs, run this in the installation folder:
 
 ```bash
-npm install n8n@latest
+npm install n8n@2
 ```
 
-For Docker installs, pull the latest image and restart the container with your existing volume:
+For Docker installs, the simplest way is to run `n8n-Installer.bat` again. Choose the same container name, answer `1` to replace the existing container, and enter the same volume name. It looks up the newest stable 2.x release for you.
+
+To do it by hand, pull a newer 2.x image and restart the container with your existing volume. Replace `<2.x.y>` with a 2.x version such as `2.42.5`; the available tags are listed on [Docker Hub](https://hub.docker.com/r/n8nio/n8n/tags):
 
 ```bash
-docker pull docker.n8n.io/n8nio/n8n
+docker pull docker.n8n.io/n8nio/n8n:<2.x.y>
 docker stop n8n
 docker rm n8n
-docker run -d --name n8n --restart unless-stopped -p 5678:5678 -v n8n_data:/home/node/.n8n docker.n8n.io/n8nio/n8n
+docker run -d --name n8n --restart unless-stopped -p 5678:5678 -v n8n_data:/home/node/.n8n docker.n8n.io/n8nio/n8n:<2.x.y>
 ```
+
+> **Do not use the `latest` or `stable` tags for now.** They move to n8n 3.0 when it is released, and this version of the installer does not support 3.0.
 
 > **How data is preserved:** `docker rm n8n` only removes the temporary container process. Your workflows, credentials, database, and encryption keys are stored inside the named Docker volume (`n8n_data`) and automatically re-attached when the new container starts.
 >
@@ -402,13 +429,13 @@ docker run -d --name n8n --restart unless-stopped -p 5678:5678 -v n8n_data:/home
 For WSL2 installs, `start_n8n_wsl.bat` can optionally check for updates each time it runs. To update manually, match the command to how n8n was installed:
 
 ```batch
-wsl -d <distro> -u root --exec sh -c "export PATH=<node-bin>:/usr/local/bin:/usr/bin:/bin:$PATH; npm install -g n8n@latest --allow-scripts=sqlite3"
+wsl -d <distro> -u root --exec sh -c "export PATH=<node-bin>:/usr/local/bin:/usr/bin:/bin:$PATH; npm install -g n8n@2 --allow-scripts=sqlite3"
 ```
 
 If the installer reported that Node.js is managed by your user (for example through nvm), drop `-u root` so the files stay owned by you:
 
 ```batch
-wsl -d <distro> --exec sh -c "export PATH=<node-bin>:/usr/local/bin:/usr/bin:/bin:$PATH; npm install -g n8n@latest --allow-scripts=sqlite3"
+wsl -d <distro> --exec sh -c "export PATH=<node-bin>:/usr/local/bin:/usr/bin:/bin:$PATH; npm install -g n8n@2 --allow-scripts=sqlite3"
 ```
 
 > **The `PATH` matters here too.** Without it, `npm` can resolve to a different Node.js version and install n8n into a prefix the launcher never reads, so nothing appears to change. The generated `README.txt` in `%USERPROFILE%\n8n-wsl` contains the exact command for your setup.
@@ -419,7 +446,7 @@ wsl -d <distro> --exec sh -c "export PATH=<node-bin>:/usr/local/bin:/usr/bin:/bi
 <summary><b>Unsupported Node.js version</b></summary>
 
 
-Native npm installs require Node.js `20.19+` or `22.x LTS`. If you see a warning about Node.js 24 or a newer release line, install Node.js 22 LTS and rerun the installer.
+Native npm installs require Node.js `24.x`. If you see a warning about another release line, install Node.js 24 LTS (pick version 24 on the [download page](https://nodejs.org/en/download)) and rerun the installer.
 
 Check your version with:
 
@@ -433,7 +460,23 @@ node --version
 <summary><b>`isolated-vm`, `node-gyp`, Python, or build tools errors</b></summary>
 
 
-These usually happen when npm cannot use a prebuilt native package for your Node version and tries to compile locally. Use Node.js 22 LTS for native installs. Installing Python or Visual Studio build tools is usually the wrong fix for this installer path.
+These usually happen when npm cannot use a prebuilt native package for your Node version and tries to compile locally. n8n's native modules (`isolated-vm`, `@confluentinc/kafka-javascript`) ship Windows binaries for Node.js 24 but not for Node.js 25 or 26, so use Node.js 24 LTS for native installs. Installing Python or Visual Studio build tools is usually the wrong fix for this installer path.
+
+</details>
+
+<details>
+<summary><b>"Your Node.js version is currently not supported by n8n"</b></summary>
+
+
+n8n 2.36 and newer need Node.js 24. This happens on Node.js 22 when n8n is updated with `npm install -g n8n@latest` or `npm install n8n@latest`, which is what the 0.2 README suggested. Back up your n8n data folder (see [Backup Your Encryption Key](#backup-your-encryption-key)), install Node.js 24 LTS, and run the installer again. For WSL2 installs, the installer offers to install Node.js 24 inside your distribution for you.
+
+</details>
+
+<details>
+<summary><b>"--allow-scripts is not allowed in project-scoped installs" (EALLOWSCRIPTS)</b></summary>
+
+
+npm 11.19 and newer reject `--allow-scripts` on the command line in a folder install. The start script that 0.2 generated for a folder install still passes it in its update command. Run the installer again to get a new start script, or open `start_n8n.bat` in the install folder and change the update line to `npm install n8n@2 --loglevel=error --no-fund --no-audit`.
 
 </details>
 

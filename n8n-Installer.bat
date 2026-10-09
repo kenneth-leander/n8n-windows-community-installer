@@ -9,6 +9,11 @@ REM Catch all exits
 set "SCRIPTDIR=%~dp0"
 if not defined SCRIPTDIR set "SCRIPTDIR=%CD%"
 
+REM Docker has no floating 2.x tag. The installer looks up the newest stable 2.x
+REM tag on Docker Hub and uses this one only if that lookup fails. Bump it with
+REM every new release of the installer.
+set "N8N_DOCKER_FALLBACK_TAG=2.42.5"
+
 goto START
 
 :END_SCRIPT
@@ -22,7 +27,7 @@ cls
 echo.
 echo  ══════════════════════════════════════════════════════════════
 echo      n8n Installation Wizard for Windows
-echo      Community Edition - Version 0.2
+echo      Community Edition - Version 0.2.1
 echo  ══════════════════════════════════════════════════════════════
 echo.
 echo  IMPORTANT NOTICE:
@@ -53,10 +58,11 @@ if !ERRORLEVEL! NEQ 0 (
     echo  [✗] Node.js is not detected
     echo.
     echo      Please install Node.js before continuing.
-    echo      Download: https://nodejs.org/
+    echo      Download: https://nodejs.org/en/download
     echo.
-    echo      Recommended: Node.js 22.x LTS
-    echo      Supported:   Node.js 20.19+ or 22.x LTS
+    echo      Recommended: Node.js 24.x LTS
+    echo      Supported:   Node.js 24.x
+    echo      Pick version 24 on the download page. Newer versions are not supported yet.
     echo.
     pause
     exit /b 1
@@ -70,15 +76,14 @@ for /f "tokens=1,2 delims=." %%a in ("%NODE_VERSION_NUMBER%") do (
 )
 if not defined NODE_MINOR set "NODE_MINOR=0"
 
-REM Node.js 22.x LTS is the ceiling. It ships npm 10, which is the pairing this
-REM installer targets. Newer Node ships newer npm, and npm 12 blocks dependency
-REM install scripts, which leaves sqlite3 without its native binary.
+REM Node.js 24.x LTS is the only supported line. n8n 2.36 and newer declare an
+REM engines.node of 24.0.0 or newer and refuse to start on older Node, and their
+REM isolated-vm dependency ships prebuilt binaries for Node 24 and 26 only, so
+REM Node 22 falls back to a compile that fails without Visual Studio build tools.
+REM Node 25 has no prebuilt binaries and Node 26 is outside the range n8n
+REM documents. Node 24 ships npm 11, which is the pairing this installer targets.
 set "NODE_SUPPORTED=NO"
-if "%NODE_MAJOR%"=="20" (
-    if %NODE_MINOR% GEQ 19 set "NODE_SUPPORTED=YES"
-) else if "%NODE_MAJOR%"=="22" (
-    set "NODE_SUPPORTED=YES"
-)
+if "%NODE_MAJOR%"=="24" set "NODE_SUPPORTED=YES"
 
 if "%NODE_SUPPORTED%"=="YES" (
     echo  [✓] Node.js %NODE_VERSION% - Supported by n8n 2.x
@@ -142,20 +147,20 @@ if "%NODE_SUPPORTED%"=="NO" (
     if "%DOCKER_AVAILABLE%"=="YES" (
         echo.
         echo  [^^!] Native npm installations are disabled with Node.js %NODE_VERSION%
-        echo      Supported: Node.js 20.19+ or 22.x LTS
+        echo      Supported: Node.js 24.x only, because n8n 2.36 and newer need it
         echo      You can still use the Docker installation option.
     ) else if "!WSL_AVAILABLE!"=="YES" (
         echo.
         echo  [^^!] Native npm installations are disabled with Node.js %NODE_VERSION%
-        echo      Supported: Node.js 20.19+ or 22.x LTS
+        echo      Supported: Node.js 24.x only, because n8n 2.36 and newer need it
         echo      You can still use the WSL2 installation option.
     ) else (
         echo.
         echo  [✗] No supported installation method is available
-        echo      Native installs require Node.js 20.19+ or 22.x LTS.
+        echo      Native installs require Node.js 24.x.
         echo      Docker Desktop is not available or not running.
         echo.
-        echo      Install Node.js 22 LTS or start Docker Desktop, then rerun.
+        echo      Install Node.js 24 LTS or start Docker Desktop, then rerun.
         echo.
         pause
         exit /b 1
@@ -167,32 +172,29 @@ echo.
 echo  Checking for updates...
 echo.
 
-REM Get latest Node.js LTS version (approximate check)
+REM Report the Node.js status. 24.x is the only supported line.
 if "%NODE_SUPPORTED%"=="YES" (
-    if "%NODE_MAJOR%"=="22" (
-        echo  [✓] Node.js %NODE_VERSION% - Supported LTS
-    ) else (
-        echo  [^^!] Node.js %NODE_VERSION% - Supported; Node.js 22.x LTS available
-        echo      Visit: https://nodejs.org/
-    )
+    echo  [✓] Node.js %NODE_VERSION% - Supported LTS
 ) else (
     echo  [^^!] Node.js %NODE_VERSION% - Native npm installs unavailable
-    echo      Recommended: Node.js 22.x LTS
-    echo      Visit: https://nodejs.org/
+    echo      Recommended: Node.js 24.x LTS
+    echo      Visit: https://nodejs.org/en/download
+    echo      Pick version 24 there. Newer versions are not supported yet.
 )
 
-REM Get highest supported npm version. npm is capped at 10.x to match the npm
-REM that ships with Node.js 22 LTS. npm 12 blocks dependency install scripts,
-REM which leaves sqlite3 without its native binary and stops n8n from starting.
+REM npm 11 ships with Node.js 24 and is the pairing this installer targets, so any
+REM npm 11 or older is left alone. npm 12 or newer blocks dependency install
+REM scripts by default, which leaves sqlite3 without its native binary and stops
+REM n8n from starting. Only that case offers to go back to the newest npm 11.
 echo.
 if "%NODE_SUPPORTED%"=="YES" (
-    for /f "tokens=*" %%i in ('npm view npm@next-10 version 2^>nul') do set NPM_MAX=%%i
-
-    if defined NPM_MAX (
-        if "!NPM_VERSION!"=="!NPM_MAX!" (
-            echo  [✓] npm !NPM_VERSION! - Highest supported version
-        ) else (
-            echo  [^^!] npm !NPM_VERSION! - Supported version available: !NPM_MAX!
+    set "NPM_MAJOR=0"
+    for /f "tokens=1 delims=." %%a in ("!NPM_VERSION!") do set "NPM_MAJOR=%%a"
+    if !NPM_MAJOR! GEQ 12 (
+        for /f "tokens=*" %%i in ('npm view npm@next-11 version 2^>nul') do set NPM_MAX=%%i
+        echo  [^^!] npm !NPM_VERSION! blocks the install scripts n8n needs
+        if defined NPM_MAX (
+            echo      Supported: npm 11.x
             echo.
             set /p "UPDATE_NPM=      Install npm !NPM_MAX! now? (Y/N): "
             if /i "!UPDATE_NPM!"=="Y" (
@@ -209,9 +211,11 @@ if "%NODE_SUPPORTED%"=="YES" (
                     echo      [✗] npm update failed, continuing
                 )
             )
+        ) else (
+            echo      Supported: npm 11.x ^(version lookup unavailable, continuing^)
         )
     ) else (
-        echo  [✓] npm %NPM_VERSION% - version check unavailable, continuing
+        echo  [✓] npm !NPM_VERSION! - Supported
     )
 ) else (
     echo  [^^!] npm update check skipped because native installs are disabled
@@ -279,7 +283,7 @@ echo  n8n Program Installation
 echo  ────────────────────────────────────────
 echo.
 echo  1. Global Installation
-echo     • npm install -g n8n
+echo     • npm install -g n8n@2
 echo     • n8n command available system-wide
 echo     • Standard installation method
 echo     • NOTE: Will overwrite existing global n8n
@@ -321,9 +325,9 @@ if "!WSL_AVAILABLE!"=="YES" (
 if "%N8N_TYPE%"=="1" (
     if not "%NODE_SUPPORTED%"=="YES" (
         echo.
-        echo  [✗] Global installation requires Node.js 20.19+ or 22.x LTS.
+        echo  [✗] Global installation requires Node.js 24.x.
         echo      Detected: %NODE_VERSION%
-        echo      Install Node.js 22 LTS or choose Docker if available.
+        echo      Install Node.js 24 LTS or choose Docker if available.
         echo.
         pause
         goto CUSTOM_INSTALL
@@ -388,9 +392,9 @@ if "%N8N_TYPE%"=="1" (
 ) else if "%N8N_TYPE%"=="2" (
     if not "%NODE_SUPPORTED%"=="YES" (
         echo.
-        echo  [✗] Folder-specific installation requires Node.js 20.19+ or 22.x LTS.
+        echo  [✗] Folder-specific installation requires Node.js 24.x.
         echo      Detected: %NODE_VERSION%
-        echo      Install Node.js 22 LTS or choose Docker if available.
+        echo      Install Node.js 24 LTS or choose Docker if available.
         echo.
         pause
         goto CUSTOM_INSTALL
@@ -957,13 +961,16 @@ pause
 exit /b 1
 
 :INSTALL_GLOBAL
-echo  Running: npm install -g n8n
+echo  Running: npm install -g n8n@2
 echo  This may take a few minutes...
 echo.
+REM n8n@2 keeps the install on the 2.x line. n8n 3.0 drops npm installs, so an
+REM unpinned install could one day resolve to a release this installer cannot run.
 REM --allow-scripts is required on npm 12+, which blocks dependency install
-REM scripts by default. Without it sqlite3 never builds. Older npm ignores it.
+REM scripts by default. Without it sqlite3 never gets its native binary. A global
+REM install is the one place npm accepts this flag. npm 11 and older do not need it.
 REM --loglevel=error hides npm's deprecation warning spam but still shows errors.
-call npm install -g n8n --allow-scripts=sqlite3 --loglevel=error --no-fund --no-audit
+call npm install -g n8n@2 --allow-scripts=sqlite3 --loglevel=error --no-fund --no-audit
 echo.
 echo  Verifying installation...
 where n8n >nul 2>&1
@@ -978,7 +985,7 @@ echo  [✓] n8n installed globally
 goto CREATE_START_SCRIPT
 
 :INSTALL_FOLDER
-echo  Running: npm install n8n in !N8N_INSTALL_PATH!
+echo  Running: npm install n8n@2 in !N8N_INSTALL_PATH!
 echo  This may take a few minutes...
 echo.
 REM cd /d leaves ERRORLEVEL untouched on success, so test the path instead.
@@ -989,7 +996,19 @@ if not exist "!N8N_INSTALL_PATH!\" (
     exit /b 1
 )
 cd /d "!N8N_INSTALL_PATH!"
-call npm install n8n --allow-scripts=sqlite3 --loglevel=error --no-fund --no-audit
+REM sqlite3 needs its install script to fetch its native binary, and npm 12 blocks
+REM dependency install scripts by default. In a project install the allowance has to
+REM live in a project .npmrc: npm 11.19 and newer reject --allow-scripts on the
+REM command line there. Older npm ignores the entry. The launcher's update command
+REM runs in this folder and reads the same file.
+findstr /b /c:"allow-scripts=" "!N8N_INSTALL_PATH!\.npmrc" >nul 2>&1
+if !ERRORLEVEL! NEQ 0 (
+    (
+        echo.
+        echo allow-scripts=sqlite3
+    ) >> "!N8N_INSTALL_PATH!\.npmrc"
+)
+call npm install n8n@2 --loglevel=error --no-fund --no-audit
 echo.
 echo  Verifying installation...
 if not exist "!N8N_INSTALL_PATH!\node_modules\n8n" (
@@ -1033,10 +1052,31 @@ if !ERRORLEVEL! NEQ 0 (
 echo  [✓] Docker volume created
 echo.
 
+REM Docker has no floating 2.x tag, and the latest and stable tags move to n8n 3.0
+REM when it is released. Ask Docker Hub which exact 2.x release stable points to
+REM now, and install that. The tag is written to a file by PowerShell and read
+REM back here, the same way the WSL probe does it.
+echo  Looking up the newest stable n8n 2.x release...
+set "N8N_DOCKER_TAG="
+set "N8N_DOCKER_TAG_FILE=%TEMP%\n8n_docker_tag.txt"
+if exist "%N8N_DOCKER_TAG_FILE%" del "%N8N_DOCKER_TAG_FILE%" >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; try { [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $b='https://hub.docker.com/v2/repositories/n8nio/n8n/tags'; $s=(Invoke-RestMethod -Uri ($b+'/stable') -TimeoutSec 20).digest; $t=@((Invoke-RestMethod -Uri ($b+'?page_size=100&name=2.') -TimeoutSec 20).results | Where-Object { $_.name -match '^2\.\d+\.\d+$' }); $m=@($t | Where-Object { $_.digest -eq $s }); if ($m.Count -gt 0) { $n=$m[0].name } elseif ($t.Count -gt 0) { $n=($t | Sort-Object { [version]$_.name } -Descending | Select-Object -First 1).name } else { $n='' }; if ($n -match '^2\.\d+\.\d+$') { [IO.File]::WriteAllText('%N8N_DOCKER_TAG_FILE%', $n) } } catch { }" 2>nul
+if exist "%N8N_DOCKER_TAG_FILE%" for /f "usebackq delims=" %%T in ("%N8N_DOCKER_TAG_FILE%") do set "N8N_DOCKER_TAG=%%T"
+if exist "%N8N_DOCKER_TAG_FILE%" del "%N8N_DOCKER_TAG_FILE%" >nul 2>&1
+if not defined N8N_DOCKER_TAG goto DOCKER_TAG_FALLBACK
+echo  [✓] n8n !N8N_DOCKER_TAG!
+goto DOCKER_TAG_READY
+
+:DOCKER_TAG_FALLBACK
+set "N8N_DOCKER_TAG=!N8N_DOCKER_FALLBACK_TAG!"
+echo  [^^!] Could not look up the newest release, using n8n !N8N_DOCKER_TAG!
+
+:DOCKER_TAG_READY
+echo.
 echo  Pulling n8n Docker image...
 echo  This may take a few minutes...
 echo.
-docker pull docker.n8n.io/n8nio/n8n 2>&1
+docker pull docker.n8n.io/n8nio/n8n:!N8N_DOCKER_TAG! 2>&1
 if !ERRORLEVEL! NEQ 0 (
     echo.
     echo  [✗] Failed to pull n8n Docker image
@@ -1048,7 +1088,7 @@ echo.
 
 echo  Starting n8n container: !DOCKER_CONTAINER!
 echo.
-docker run -d --name !DOCKER_CONTAINER! --restart unless-stopped -p !N8N_PORT!:5678 -e GENERIC_TIMEZONE="!DOCKER_TIMEZONE!" -e TZ="!DOCKER_TIMEZONE!" -v !DOCKER_VOLUME!:/home/node/.n8n docker.n8n.io/n8nio/n8n 2>&1
+docker run -d --name !DOCKER_CONTAINER! --restart unless-stopped -p !N8N_PORT!:5678 -e GENERIC_TIMEZONE="!DOCKER_TIMEZONE!" -e TZ="!DOCKER_TIMEZONE!" -v !DOCKER_VOLUME!:/home/node/.n8n docker.n8n.io/n8nio/n8n:!N8N_DOCKER_TAG! 2>&1
 if !ERRORLEVEL! NEQ 0 (
     echo.
     echo  [✗] Failed to start n8n container
@@ -1116,6 +1156,7 @@ if "!N8N_INSTALL_TYPE!"=="DOCKER" (
                 echo echo Checking for n8n updates...
                 echo for /f "tokens=*" %%%%i in ^('npm view n8n version 2^^^>nul'^) do set LATEST=%%%%i
                 echo for /f "tokens=*" %%%%i in ^('npx n8n --version 2^^^>nul'^) do set CURRENT=%%%%i
+                echo if not "%%LATEST:~0,2%%"=="2." set LATEST=%%CURRENT%%
                 echo if not "^^!CURRENT^^!"=="^^!LATEST^^!" ^(
                 echo     echo.
                 echo     echo   Update available: ^^!CURRENT^^! -^^^> ^^!LATEST^^!
@@ -1124,7 +1165,7 @@ if "!N8N_INSTALL_TYPE!"=="DOCKER" (
                 echo     if /i "^^!DO_UPDATE^^!"=="Y" ^(
                 echo         echo.
                 echo         echo   Updating n8n...
-                echo         npm update n8n --allow-scripts=sqlite3 --loglevel=error --no-fund --no-audit
+                echo         npm install n8n@2 --loglevel=error --no-fund --no-audit
                 echo         echo.
                 echo         echo   [OK] Update complete
                 echo         echo.
@@ -1162,6 +1203,7 @@ if "!N8N_INSTALL_TYPE!"=="DOCKER" (
                 echo echo Checking for n8n updates...
                 echo for /f "tokens=*" %%%%i in ^('npm view n8n version 2^^^>nul'^) do set LATEST=%%%%i
                 echo for /f "tokens=*" %%%%i in ^('n8n --version 2^^^>nul'^) do set CURRENT=%%%%i
+                echo if not "%%LATEST:~0,2%%"=="2." set LATEST=%%CURRENT%%
                 echo if not "^^!CURRENT^^!"=="^^!LATEST^^!" ^(
                 echo     echo.
                 echo     echo   Update available: ^^!CURRENT^^! -^^^> ^^!LATEST^^!
@@ -1170,7 +1212,7 @@ if "!N8N_INSTALL_TYPE!"=="DOCKER" (
                 echo     if /i "^^!DO_UPDATE^^!"=="Y" ^(
                 echo         echo.
                 echo         echo   Updating n8n globally...
-                echo         npm update -g n8n --allow-scripts=sqlite3 --loglevel=error --no-fund --no-audit
+                echo         npm install -g n8n@2 --allow-scripts=sqlite3 --loglevel=error --no-fund --no-audit
                 echo         echo.
                 echo         echo   [OK] Update complete
                 echo         echo.
@@ -1241,6 +1283,7 @@ echo  Installation Type: !N8N_INSTALL_TYPE! >> "!README_FILE!"
 if "!N8N_INSTALL_TYPE!"=="DOCKER" (
     echo  Container Name:    !DOCKER_CONTAINER! >> "!README_FILE!"
     echo  Docker Volume:     !DOCKER_VOLUME! >> "!README_FILE!"
+    echo  n8n Image:         docker.n8n.io/n8nio/n8n:!N8N_DOCKER_TAG! >> "!README_FILE!"
     echo  Timezone:          !DOCKER_TIMEZONE! >> "!README_FILE!"
     echo  Network Port:      !N8N_PORT! >> "!README_FILE!"
 ) else (
@@ -1278,6 +1321,15 @@ if "!N8N_INSTALL_TYPE!"=="DOCKER" (
     echo  • Access container:      docker exec -it !DOCKER_CONTAINER! sh >> "!README_FILE!"
     echo  • Remove container:      docker rm -f !DOCKER_CONTAINER! >> "!README_FILE!"
     echo  • Backup data volume:    docker volume inspect !DOCKER_VOLUME! >> "!README_FILE!"
+    echo. >> "!README_FILE!"
+    echo  Updating n8n: >> "!README_FILE!"
+    echo  ───────────── >> "!README_FILE!"
+    echo  • This installer keeps n8n on version 2.x. To move to the newest stable >> "!README_FILE!"
+    echo    2.x release, run it again, choose the same container name, answer 1 to >> "!README_FILE!"
+    echo    remove the existing container, and enter the same volume name. Your >> "!README_FILE!"
+    echo    workflows and credentials stay in the volume. >> "!README_FILE!"
+    echo  • Avoid the latest and stable image tags. They move to n8n 3.0 once it is >> "!README_FILE!"
+    echo    released, and 3.0 removes nodes and changes defaults. >> "!README_FILE!"
 ) else (
     echo  1. Double-click or run: !START_SCRIPT! >> "!README_FILE!"
     echo  2. Wait for n8n to start (you'll see "Editor is now accessible") >> "!README_FILE!"
@@ -1378,7 +1430,7 @@ echo  SYSTEM INFORMATION >> "!README_FILE!"
 echo ════════════════════════════════════════════════════════════════ >> "!README_FILE!"
 echo. >> "!README_FILE!"
 echo  Installation Date: %DATE% %TIME% >> "!README_FILE!"
-echo  Installer Version: 0.2 >> "!README_FILE!"
+echo  Installer Version: 0.2.1 >> "!README_FILE!"
 echo  Node.js Version:   Run 'node --version' to check >> "!README_FILE!"
 echo  npm Version:       Run 'npm --version' to check >> "!README_FILE!"
 echo. >> "!README_FILE!"
@@ -1417,6 +1469,7 @@ echo.
 if "!N8N_INSTALL_TYPE!"=="DOCKER" (
     echo  [✓] n8n installed to: Docker Container
     echo  [✓] Container name: !DOCKER_CONTAINER!
+    echo  [✓] n8n version: !N8N_DOCKER_TAG!
     echo  [✓] Data volume: !DOCKER_VOLUME!
     echo  [✓] README file: !N8N_INSTALL_PATH!\README.txt
 ) else if "!N8N_INSTALL_TYPE!"=="GLOBAL" (
@@ -1584,7 +1637,7 @@ if not defined WSLP_WSLUSER (
     goto ASK_WSL_DISTRO
 )
 
-REM Node version rule mirrors the Windows gate exactly: 20.19+ or 22.x
+REM Node version rule mirrors the Windows gate exactly: 24.x only
 set "WSL_NODE_OK=NO"
 set "WSL_NODE_MAJOR="
 set "WSL_NODE_MINOR="
@@ -1605,11 +1658,7 @@ if not "!WSLP_NODEVER!"=="none" (
     )
 )
 if not defined WSL_NODE_MINOR set "WSL_NODE_MINOR=0"
-if "!WSL_NODE_MAJOR!"=="20" (
-    if !WSL_NODE_MINOR! GEQ 19 set "WSL_NODE_OK=YES"
-) else if "!WSL_NODE_MAJOR!"=="22" (
-    set "WSL_NODE_OK=YES"
-)
+if "!WSL_NODE_MAJOR!"=="24" set "WSL_NODE_OK=YES"
 
 REM Ownership decides root vs user install. A Node managed under the user's home
 REM (nvm) must never be written to as root, or the user's Node tree ends up
@@ -1642,11 +1691,12 @@ if /i "!WSLP_OSID!"=="arch" set "WSL_PKG_OK=PAC"
 if /i "!WSLP_OSID!"=="opensuse-leap" set "WSL_PKG_OK=ZYP"
 if /i "!WSLP_OSID!"=="opensuse-tumbleweed" set "WSL_PKG_OK=ZYP"
 
-REM Only NodeSource pins 22.x. apk, pacman and zypper ship current Node, which
-REM this installer would then reject, so do not promise 22 LTS there.
-set "WSL_PKG_N22=NO"
-if "!WSL_PKG_OK!"=="DEB" set "WSL_PKG_N22=YES"
-if "!WSL_PKG_OK!"=="RPM" set "WSL_PKG_N22=YES"
+REM Only NodeSource pins 24.x. apk, pacman and zypper ship whatever Node their
+REM repository carries, which this installer rejects unless it is 24, so do not
+REM promise 24 LTS there.
+set "WSL_PKG_N24=NO"
+if "!WSL_PKG_OK!"=="DEB" set "WSL_PKG_N24=YES"
+if "!WSL_PKG_OK!"=="RPM" set "WSL_PKG_N24=YES"
 
 set "WSL_NODE_OFFER=NO"
 if "!WSL_USE_ROOT!"=="YES" if not "!WSL_PKG_OK!"=="NO" set "WSL_NODE_OFFER=YES"
@@ -1674,7 +1724,7 @@ if "!WSLP_NODEVER!"=="none" (
     echo   npm found:      !WSLP_NPMVER!
     echo   Real path:      !WSLP_NODEPATH!
 )
-echo   n8n requires:   Node.js 20.19+ or 22.x LTS
+echo   n8n requires:   Node.js 24.x LTS
 if "!WSL_USE_ROOT!"=="YES" (
     echo   Managed by:     the system
 ) else (
@@ -1689,8 +1739,8 @@ echo.
 echo  ────────────────────────────────────────
 echo.
 if "!WSL_USE_ROOT!"=="YES" (
-    if "!WSL_PKG_N22!"=="YES" (
-        echo   1. Install Node.js 22 LTS inside !WSL_DISTRO!   [recommended]
+    if "!WSL_PKG_N24!"=="YES" (
+        echo   1. Install Node.js 24 LTS inside !WSL_DISTRO!   [recommended]
         echo      Installs system-wide as root from the official NodeSource
         echo      repository. Nothing else is changed.
     ) else if "!WSL_PKG_OK!"=="NO" (
@@ -1699,12 +1749,12 @@ if "!WSL_USE_ROOT!"=="YES" (
         echo      installer has no Node.js provisioning steps for.
     ) else (
         echo   1. Install Node.js from the !WSL_DISTRO! package manager
-        echo      This distribution does not ship a Node.js 22 LTS package, so
+        echo      This distribution does not ship a Node.js 24 LTS package, so
         echo      you may get a newer version. It is re-checked afterwards and
         echo      you will be told if it is still unsupported.
     )
 ) else if "!WSL_NVM_OK!"=="YES" (
-    echo   1. Install Node.js 22 LTS via nvm               [recommended]
+    echo   1. Install Node.js 24 LTS via nvm               [recommended]
     echo      Runs as !WSLP_WSLUSER!, not root. Your other versions are kept.
 ) else if "!WSL_NVM!"=="YES" (
     echo   1. Not offered for this setup
@@ -1743,7 +1793,7 @@ if not "!WSL_NODE_OFFER!"=="YES" (
 
 :WSL_INSTALL_NODE
 echo.
-echo  Installing Node.js 22 LTS inside !WSL_DISTRO!...
+echo  Installing Node.js 24 LTS inside !WSL_DISTRO!...
 echo  This may take a few minutes.
 echo.
 if "!WSL_USE_ROOT!"=="NO" goto WSL_INSTALL_NODE_NVM
@@ -1757,19 +1807,19 @@ REM resolve versions. nvm layout is <root>/versions/node/<ver>/bin/node.
 REM The default alias is deliberately left alone - the launcher pins the full
 REM PATH, so repointing the user's global default Node would be a needless
 REM change to their environment.
-wsl -d !WSL_DISTRO! --exec bash -c "NR=$(dirname $(dirname $(dirname $(dirname $(dirname !WSLP_NODEPATH!))))); if [ -s $NR/nvm.sh ]; then NRFOUND=1; else NR=$HOME/.nvm; fi; if [ -s $NR/nvm.sh ]; then . $NR/nvm.sh; nvm install 22; else echo NVM_SCRIPT_NOT_FOUND; exit 1; fi"
-REM nvm only adjusts PATH in interactive shells, so ask it where 22 landed
+wsl -d !WSL_DISTRO! --exec bash -c "NR=$(dirname $(dirname $(dirname $(dirname $(dirname !WSLP_NODEPATH!))))); if [ -s $NR/nvm.sh ]; then NRFOUND=1; else NR=$HOME/.nvm; fi; if [ -s $NR/nvm.sh ]; then . $NR/nvm.sh; nvm install 24; else echo NVM_SCRIPT_NOT_FOUND; exit 1; fi"
+REM nvm only adjusts PATH in interactive shells, so ask it where 24 landed
 REM instead of hoping a later 'command -v node' picks it up.
 set "WSL_NEWBIN="
-for /f "usebackq tokens=*" %%P in (`wsl -d !WSL_DISTRO! --exec bash -c "NR=$(dirname $(dirname $(dirname $(dirname $(dirname !WSLP_NODEPATH!))))); if [ -s $NR/nvm.sh ]; then NRFOUND=1; else NR=$HOME/.nvm; fi; . $NR/nvm.sh >/dev/null 2>&1; NW=$(nvm which 22 2>/dev/null); NW=${NW:-none}; if [ $NW = none ]; then echo none; else dirname $NW; fi" ^<nul`) do set "WSL_NEWBIN=%%P"
+for /f "usebackq tokens=*" %%P in (`wsl -d !WSL_DISTRO! --exec bash -c "NR=$(dirname $(dirname $(dirname $(dirname $(dirname !WSLP_NODEPATH!))))); if [ -s $NR/nvm.sh ]; then NRFOUND=1; else NR=$HOME/.nvm; fi; . $NR/nvm.sh >/dev/null 2>&1; NW=$(nvm which 24 2>/dev/null); NW=${NW:-none}; if [ $NW = none ]; then echo none; else dirname $NW; fi" ^<nul`) do set "WSL_NEWBIN=%%P"
 if defined WSL_NEWBIN if not "!WSL_NEWBIN!"=="none" set "WSL_PATH_HINT=!WSL_NEWBIN!"
 goto WSL_NODE_RECHECK
 
 :WSL_INSTALL_NODE_PKG
 if "!WSL_PKG_OK!"=="DEB" (
-    wsl -d !WSL_DISTRO! -u root --exec sh -c "export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y -qq curl ca-certificates python3 make g++ && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y -qq nodejs"
+    wsl -d !WSL_DISTRO! -u root --exec sh -c "export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y -qq curl ca-certificates python3 make g++ && curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && apt-get install -y -qq nodejs"
 ) else if "!WSL_PKG_OK!"=="RPM" (
-    wsl -d !WSL_DISTRO! -u root --exec sh -c "curl -fsSL https://rpm.nodesource.com/setup_22.x | bash - && dnf install -y -q nodejs gcc-c++ make python3"
+    wsl -d !WSL_DISTRO! -u root --exec sh -c "curl -fsSL https://rpm.nodesource.com/setup_24.x | bash - && dnf install -y -q nodejs gcc-c++ make python3"
 ) else if "!WSL_PKG_OK!"=="APK" (
     wsl -d !WSL_DISTRO! -u root --exec sh -c "apk add --no-cache nodejs npm python3 make g++ curl ca-certificates"
 ) else if "!WSL_PKG_OK!"=="PAC" (
@@ -1941,15 +1991,15 @@ echo.
 echo  Step 3 of 4: Installing n8n in !WSL_DISTRO!
 echo  ────────────────────────────────────────
 echo.
-echo  Running: npm install -g n8n
+echo  Running: npm install -g n8n@2
 echo  This may take a few minutes...
 echo.
 REM PATH is injected explicitly rather than relying on a login shell: sh -lc on
 REM Debian derivatives reads ~/.profile and misses an nvm setup from ~/.bashrc.
 if "!WSL_USE_ROOT!"=="YES" (
-    wsl -d !WSL_DISTRO! -u root --exec sh -c "export PATH=!WSL_NODEBIN!:/usr/local/bin:/usr/bin:/bin:$PATH; npm install -g n8n --allow-scripts=sqlite3 --loglevel=error --no-fund --no-audit"
+    wsl -d !WSL_DISTRO! -u root --exec sh -c "export PATH=!WSL_NODEBIN!:/usr/local/bin:/usr/bin:/bin:$PATH; npm install -g n8n@2 --allow-scripts=sqlite3 --loglevel=error --no-fund --no-audit"
 ) else (
-    wsl -d !WSL_DISTRO! --exec sh -c "export PATH=!WSL_NODEBIN!:$PATH; npm install -g n8n --allow-scripts=sqlite3 --loglevel=error --no-fund --no-audit"
+    wsl -d !WSL_DISTRO! --exec sh -c "export PATH=!WSL_NODEBIN!:$PATH; npm install -g n8n@2 --allow-scripts=sqlite3 --loglevel=error --no-fund --no-audit"
 )
 
 echo.
@@ -2006,6 +2056,7 @@ echo echo Checking for n8n updates...>> "!START_SCRIPT!"
 echo for /f "usebackq tokens=*" %%%%i in (`wsl -d !WSL_DISTRO! --exec sh -c "export PATH=!WSL_RUNPATH!; n8n --version 2>/dev/null"`) do set CURRENT=%%%%i>> "!START_SCRIPT!"
 echo for /f "usebackq tokens=*" %%%%i in (`wsl -d !WSL_DISTRO! --exec sh -c "export PATH=!WSL_RUNPATH!; npm view n8n version 2>/dev/null"`) do set LATEST=%%%%i>> "!START_SCRIPT!"
 echo if "%%LATEST%%"=="" goto SKIPUPDATE>> "!START_SCRIPT!"
+echo if not "%%LATEST:~0,2%%"=="2." goto SKIPUPDATE>> "!START_SCRIPT!"
 echo if "%%CURRENT%%"=="%%LATEST%%" goto UPTODATE>> "!START_SCRIPT!"
 echo echo.>> "!START_SCRIPT!"
 echo echo   Update available: %%CURRENT%% -^^^> %%LATEST%%>> "!START_SCRIPT!"
@@ -2015,9 +2066,9 @@ echo if /i not "%%DO_UPDATE%%"=="Y" goto SKIPUPDATE>> "!START_SCRIPT!"
 echo echo.>> "!START_SCRIPT!"
 echo echo   Updating n8n...>> "!START_SCRIPT!"
 if "!WSL_USE_ROOT!"=="YES" (
-    echo wsl -d !WSL_DISTRO! -u root --exec sh -c "export PATH=!WSL_RUNPATH!; npm install -g n8n --allow-scripts=sqlite3 --loglevel=error --no-fund --no-audit">> "!START_SCRIPT!"
+    echo wsl -d !WSL_DISTRO! -u root --exec sh -c "export PATH=!WSL_RUNPATH!; npm install -g n8n@2 --allow-scripts=sqlite3 --loglevel=error --no-fund --no-audit">> "!START_SCRIPT!"
 ) else (
-    echo wsl -d !WSL_DISTRO! --exec sh -c "export PATH=!WSL_RUNPATH!; npm install -g n8n --allow-scripts=sqlite3 --loglevel=error --no-fund --no-audit">> "!START_SCRIPT!"
+    echo wsl -d !WSL_DISTRO! --exec sh -c "export PATH=!WSL_RUNPATH!; npm install -g n8n@2 --allow-scripts=sqlite3 --loglevel=error --no-fund --no-audit">> "!START_SCRIPT!"
 )
 echo echo.>> "!START_SCRIPT!"
 echo echo   [OK] Update complete>> "!START_SCRIPT!"
@@ -2140,9 +2191,9 @@ echo    wsl -d !WSL_DISTRO! --exec sh -c "ss -tulpn ^| grep !N8N_PORT!" >> "!REA
 echo. >> "!README_FILE!"
 echo  Update n8n manually: >> "!README_FILE!"
 if "!WSL_USE_ROOT!"=="YES" (
-    echo    wsl -d !WSL_DISTRO! -u root --exec sh -c "export PATH=!WSL_RUNPATH!; npm install -g n8n@latest --allow-scripts=sqlite3" >> "!README_FILE!"
+    echo    wsl -d !WSL_DISTRO! -u root --exec sh -c "export PATH=!WSL_RUNPATH!; npm install -g n8n@2 --allow-scripts=sqlite3" >> "!README_FILE!"
 ) else (
-    echo    wsl -d !WSL_DISTRO! --exec sh -c "export PATH=!WSL_RUNPATH!; npm install -g n8n@latest --allow-scripts=sqlite3" >> "!README_FILE!"
+    echo    wsl -d !WSL_DISTRO! --exec sh -c "export PATH=!WSL_RUNPATH!; npm install -g n8n@2 --allow-scripts=sqlite3" >> "!README_FILE!"
     echo    ^(installed under your user account, so root is not used^) >> "!README_FILE!"
 )
 echo. >> "!README_FILE!"
@@ -2251,7 +2302,7 @@ echo  SYSTEM INFORMATION >> "!README_FILE!"
 echo ════════════════════════════════════════════════════════════════ >> "!README_FILE!"
 echo. >> "!README_FILE!"
 echo  Installation Date: %DATE% %TIME% >> "!README_FILE!"
-echo  Installer Version: 0.2 >> "!README_FILE!"
+echo  Installer Version: 0.2.1 >> "!README_FILE!"
 echo  WSL Distribution:  !WSL_DISTRO! >> "!README_FILE!"
 echo  Linux Node.js:     !WSLP_NODEVER! >> "!README_FILE!"
 echo  Linux npm:         !WSLP_NPMVER! >> "!README_FILE!"
