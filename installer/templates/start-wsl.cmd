@@ -33,7 +33,8 @@ echo   Address: http://localhost:%N8N_PORT%
 echo   It opens in your browser as soon as it is ready. The first start takes a minute.
 echo   Press Ctrl+C in this window, or use "Stop n8n" in the Start menu, to stop n8n.
 echo.
-if not defined N8N_NO_BROWSER start "" /b "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0support\wait-n8n.ps1" -Url "http://localhost:%N8N_PORT%" -Open
+rem The browser helper shares this window with n8n, so it must not be started hidden: that would hide this window.
+if not defined N8N_NO_BROWSER start "" /b "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0support\wait-n8n.ps1" -Url "http://localhost:%N8N_PORT%" -Open
 
 rem N8N_USER_FOLDER is the home folder; n8n adds the ".n8n" folder inside it by itself.
 "%SystemRoot%\System32\wsl.exe" -d @@DISTRO@@ --exec sh -c "PATH=@@WSL_PATH@@; export PATH; cd @@WSL_HOME@@; export N8N_USER_FOLDER=@@WSL_HOME@@; export N8N_PORT=%N8N_PORT%; export N8N_RUNNERS_BROKER_PORT=%N8N_BROKER_PORT%; export N8N_PROTOCOL=http; export N8N_HOST=localhost; export N8N_LISTEN_ADDRESS=%N8N_LISTEN%; export N8N_UNVERIFIED_PACKAGES_ENABLED=true; @@WSL_COOKIE@@ %N8N_EXTRA% exec n8n start"
