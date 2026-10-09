@@ -59,8 +59,8 @@ in a terminal sets one up). Inside it, it:
   to install by hand
 * installs the newest n8n 2.x with `npm install -g`: as root when Node.js is installed for the whole system, as the
   user when Node.js lives in the user's home folder
-* writes `start-n8n.cmd` and `stop-n8n.cmd` in the install folder, because n8n keeps running inside Linux when the
-  window that started it is gone
+* writes `start-n8n.cmd` and `stop-n8n.cmd` in the install folder, because closing the window that started n8n does
+  not always stop it inside Linux
 
 n8n keeps its data on the Linux disk, in `.n8n` in the home folder of the default user (File Explorer shows it at
 `\\wsl$\<distribution>\home\<user>\.n8n`). Windows passes n8n on to this computer only, so "other devices on my

@@ -188,7 +188,70 @@ Test-Case -Name 'docker-windows-containers' -InstallArgs @('/METHOD=docker', '/F
 Test-Case -Name 'failing-program' -InstallArgs @('/METHOD=folder') -DryRunSwitch '/DRYRUN=fail' -ExpectExit 3 `
     -ExpectInLog @('FAILED: npm could not install n8n')
 
-# {WSL-CASES}
+# --- Linux inside Windows (WSL2) ---------------------------------------------
+# GitHub's computers have no Linux distribution to install into. Setup is told which distributions exist
+# (/FAKEWSL=name|version|state;...) and what its look inside Linux would have found (/FAKEWSLUSER, /FAKEWSLNODE,
+# /FAKEWSLNVM, /FAKEWSLPREFIX, /FAKEWSLN8N, /FAKEWSLOS, /FAKEWSLSTUCK; they are listed at the top of installer\code\wsl.iss).
+# What it would hand to wsl.exe is checked in the log.
+$fakeWsl = '/FAKEWSL=Ubuntu|2|Running;Debian|1|Stopped'
+Test-Case -Name 'wsl' -InstallArgs @('/METHOD=wsl', $fakeWsl, '/WSLDISTRO=Ubuntu') -StopShortcut `
+    -ExpectInLog @('Linux user: ken\s+Home folder: /home/ken',
+        'wsl\.exe -d Ubuntu -u root --exec sh -c "[^"]*npm install -g n8n@2 --allow-scripts=sqlite3',
+        'set "N8N_LISTEN=0\.0\.0\.0"',
+        '--exec sh -c "exec pkill -f /usr/bin/n8n\.start"',
+        '\\\\wsl\$\\Ubuntu\\home\\ken\\\.n8n') `
+    -ExpectNotInLog @('nodesource', 'sudo') `
+    -UninstallIn @('pkill -f /usr/bin/n8n\.start', 'wsl\.exe -d Ubuntu -u root --exec sh -c "[^"]*npm uninstall -g n8n') `
+    -UninstallNotIn @('rm -rf')
+Test-Case -Name 'wsl-own-port' -InstallArgs @('/METHOD=wsl', $fakeWsl, '/WSLDISTRO=Ubuntu', '/PORT=5690') -StopShortcut `
+    -ExpectInLog @('Method: wsl\s+Port: 5690',
+        'set "N8N_PORT=5690"',
+        'http://localhost:5690')
+Test-Case -Name 'wsl-adds-node' -InstallArgs @('/METHOD=wsl', $fakeWsl, '/WSLDISTRO=Ubuntu', '/FAKEWSLNODE=none') -StopShortcut `
+    -ExpectInLog @('Node\.js is not installed inside Ubuntu',
+        'wsl\.exe -d Ubuntu -u root --exec sh -c "[^"]*apt-get install -y -qq nodejs',
+        'curl -fsSL https://deb\.nodesource\.com/setup_22\.x -o /tmp/n8n-nodesource\.sh',
+        'Node\.js 22\.20\.0')
+Test-Case -Name 'wsl-old-node' -InstallArgs @('/METHOD=wsl', $fakeWsl, '/WSLDISTRO=Ubuntu', '/FAKEWSLNODE=18.19.1') -StopShortcut `
+    -ExpectInLog @('Ubuntu has Node\.js 18\.19\.1, which n8n 2\.x does not run on', 'setup_22\.x')
+Test-Case -Name 'wsl-old-node-stays' -InstallArgs @('/METHOD=wsl', $fakeWsl, '/WSLDISTRO=Ubuntu', '/FAKEWSLNODE=18.19.1', '/FAKEWSLSTUCK') -ExpectExit 3 `
+    -ExpectInLog @('FAILED: Node\.js 22 was added, but Ubuntu still uses Node\.js 18\.19\.1')
+Test-Case -Name 'wsl-alpine-without-node' -InstallArgs @('/METHOD=wsl', $fakeWsl, '/WSLDISTRO=Ubuntu', '/FAKEWSLNODE=none', '/FAKEWSLOS=alpine') -ExpectExit 3 `
+    -ExpectInLog @('FAILED: Node\.js is not installed inside Ubuntu', 'Alpine Linux may give a newer Node\.js') `
+    -ExpectNotInLog @('apk add')
+Test-Case -Name 'wsl-fedora-adds-node' -InstallArgs @('/METHOD=wsl', $fakeWsl, '/WSLDISTRO=Ubuntu', '/FAKEWSLNODE=none', '/FAKEWSLOS=fedora') -StopShortcut `
+    -ExpectInLog @('rpm\.nodesource\.com/setup_22\.x', 'dnf install -y -q nodejs')
+Test-Case -Name 'wsl-nvm-user' -InstallArgs @('/METHOD=wsl', $fakeWsl, '/WSLDISTRO=Ubuntu', '/FAKEWSLNVM', '/FAKEWSLNODE=18.19.1') -StopShortcut `
+    -ExpectInLog @('wsl\.exe -d Ubuntu --exec bash -c "[^"]*nvm install 22',
+        'n8n is installed for ken only',
+        'wsl\.exe -d Ubuntu --exec sh -c "[^"]*npm install -g n8n@2 --allow-scripts=sqlite3') `
+    -ExpectNotInLog @('-u root') `
+    -UninstallNotIn @('-u root')
+Test-Case -Name 'wsl-own-npm-folder' -InstallArgs @('/METHOD=wsl', $fakeWsl, '/WSLDISTRO=Ubuntu', '/FAKEWSLPREFIX=/home/ken/.npm-global') -StopShortcut `
+    -ExpectInLog @('PATH=/usr/bin:/home/ken/\.npm-global/bin:/usr/local/bin:/usr/bin:/bin:\$PATH', 'wsl\.exe -d Ubuntu --exec sh -c "[^"]*npm install -g n8n@2 --allow-scripts=sqlite3')
+Test-Case -Name 'wsl-root-user' -InstallArgs @('/METHOD=wsl', $fakeWsl, '/WSLDISTRO=Ubuntu', '/FAKEWSLUSER=root') -StopShortcut `
+    -ExpectInLog @('Linux user: root\s+Home folder: /root', 'cd /root; export N8N_USER_FOLDER=/root') `
+    -UninstallArgs @('/DELETEDATA=1') `
+    -UninstallIn @('--exec rm -rf /root/\.n8n')
+Test-Case -Name 'wsl-wsl1' -InstallArgs @('/METHOD=wsl', $fakeWsl, '/WSLDISTRO=Debian') -StopShortcut `
+    -ExpectInLog @('Debian runs on WSL 1', 'set "N8N_LISTEN=127\.0\.0\.1"') `
+    -ExpectNotInLog @('set "N8N_LISTEN=0\.0\.0\.0"')
+Test-Case -Name 'wsl-lan-ignored' -InstallArgs @('/METHOD=wsl', $fakeWsl, '/WSLDISTRO=Ubuntu', '/LAN=1') -StopShortcut `
+    -ExpectInLog @('/LAN is ignored for Linux inside Windows', 'set "N8N_LISTEN=0\.0\.0\.0"') `
+    -ExpectNotInLog @('true; export N8N_SECURE_COOKIE=false;')
+Test-Case -Name 'wsl-delete-data' -InstallArgs @('/METHOD=wsl', $fakeWsl, '/WSLDISTRO=Ubuntu') -StopShortcut `
+    -UninstallArgs @('/DELETEDATA=1') `
+    -UninstallIn @('--exec rm -rf /home/ken/\.n8n', 'Deleting /home/ken/\.n8n inside Ubuntu')
+Test-Case -Name 'wsl-existing-n8n' -InstallArgs @('/METHOD=wsl', $fakeWsl, '/WSLDISTRO=Ubuntu', '/FAKEWSLN8N=2.40.0') -ExpectExit 1 `
+    -ExpectInLog @('n8n 2\.40\.0 \(/usr/bin/n8n\) is already installed inside Ubuntu')
+Test-Case -Name 'wsl-unknown-distro' -InstallArgs @('/METHOD=wsl', $fakeWsl, '/WSLDISTRO=Nope') -ExpectExit 1 `
+    -ExpectInLog @('"Nope" was not found in WSL')
+Test-Case -Name 'wsl-name-with-space' -InstallArgs @('/METHOD=wsl', '/FAKEWSL="My Distro|2|Running"', '/WSLDISTRO="My Distro"') -ExpectExit 1 `
+    -ExpectInLog @('The Linux distribution "My Distro" has a name with spaces')
+Test-Case -Name 'wsl-no-distro' -InstallArgs @('/METHOD=wsl', '/FAKEWSL=') -ExpectExit 1 `
+    -ExpectInLog @('No Linux distribution is set up in WSL')
+Test-Case -Name 'wsl-failing-program' -InstallArgs @('/METHOD=wsl', $fakeWsl, '/WSLDISTRO=Ubuntu') -DryRunSwitch '/DRYRUN=fail' -ExpectExit 3 `
+    -ExpectInLog @('FAILED: npm could not install n8n inside Ubuntu')
 
 Write-Host ''
 Remove-Item -Path $work -Recurse -Force -ErrorAction SilentlyContinue

@@ -107,7 +107,7 @@ end;
 // The last look before anything is changed.
 function CheckBeforeInstall: Boolean;
 var
-  Problem: String;
+  Problem, Existing: String;
   Need, Have: Integer;
 begin
   Result := True;
@@ -126,6 +126,16 @@ begin
         'Continuing replaces it with a new one. Its data volume is not deleted. Replace it?', False);
     if not Result then Exit;
     Need := 3000;
+  end
+  else if Cfg.Method = MethodWsl then
+  begin
+    // An n8n that is already inside the distribution is replaced by the newest 2.x (its data is kept).
+    Existing := WslExistingN8nText;
+    if (Existing <> '') and not FileExists(CutBackslash(WizardDirValue) + '\n8n-installer.ini') then
+      Result := AskYesNo('n8n ' + Existing + ' is already installed inside ' + Cfg.WslDistro + '.' + #13#10#13#10 +
+        'Continuing replaces it with the newest n8n 2.x. Your workflows and settings are kept. Replace it?', False);
+    if not Result then Exit;
+    Need := 2000;
   end
   else
     Need := 2000;
@@ -163,7 +173,7 @@ begin
     T := T + 'Time zone: ' + Cfg.DockerTz + NewLine + NewLine;
   end
   else if Cfg.Method = MethodWsl then
-    T := T + 'Linux distribution: ' + Cfg.WslDistro + NewLine + NewLine
+    T := T + 'Linux distribution: ' + Cfg.WslDistro + NewLine + WslReadyNote(Space, NewLine) + NewLine
   else if Cfg.Method = MethodFolder then
     T := T + 'Node.js ' + PrivateNodeLine + ' is downloaded into the folder, so you need nothing else installed.' + NewLine + NewLine;
 
@@ -371,7 +381,8 @@ begin
   Result := Cfg.Desktop;
 end;
 
-// Docker and Linux (WSL2) keep n8n running outside the window that started it, so they get a Stop n8n shortcut.
+// Docker keeps n8n running after its window is closed. For Linux (WSL2) closing the window usually stops n8n, but not
+// always, and a lost window, an automated start and the tests need a way to stop it too, so it gets a Stop n8n shortcut.
 function HasStopScript: Boolean;
 begin
   Result := (Cfg.Method = MethodDocker) or (Cfg.Method = MethodWsl);

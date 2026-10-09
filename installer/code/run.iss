@@ -38,8 +38,12 @@ begin
     GLastLines[I] := '';
 end;
 
-procedure OnToolOutput(const S: String; const Error, FirstLine: Boolean);
+procedure OnToolOutput(const Raw: String; const Error, FirstLine: Boolean);
+var
+  S: String;
 begin
+  // wsl.exe writes its own messages as UTF-16, which arrive with a zero byte after every letter.
+  S := ReplaceAll(Raw, #0, '');
   if Error then
   begin
     FileLog('! output problem: ' + S);

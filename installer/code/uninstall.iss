@@ -73,7 +73,7 @@ begin
   OpenLogFile('uninstall');
   FileLog('Removing the ' + Method + ' install in ' + ExpandConstant('{app}'));
   if Method = MethodDocker then UninstallDockerInstall
-  else if Method = MethodWsl then UninstallWslInstall
+  else if Method = MethodWsl then UninstallWslRun(GDeleteData, GKeptNote)
   else if Method = MethodGlobal then UninstallGlobalInstall
   else UninstallFolderInstall;
 

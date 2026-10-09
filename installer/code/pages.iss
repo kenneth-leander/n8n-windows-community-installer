@@ -198,6 +198,9 @@ begin
     Result := 'Please enter a time zone, for example Europe/London. UTC is fine if you are not sure.'
   else if (Cfg.Method = MethodWsl) and (Cfg.WslDistro = '') then
     Result := 'Please choose a Linux distribution.'
+  else if (Cfg.Method = MethodWsl) and not IsSafeName(Cfg.WslDistro) then
+    Result := 'The Linux distribution "' + Cfg.WslDistro + '" has a name with spaces or special characters, and wsl.exe cannot be asked to use it from here. ' +
+      'Choose another distribution, or import it again under a simpler name (letters, numbers and dashes only) with  wsl --export  and  wsl --import.'
   else if (Cfg.Method = MethodWsl) and (GWantDistro <> '') and (CompareText(Cfg.WslDistro, GWantDistro) <> 0) then
     Result := 'The Linux distribution "' + GWantDistro + '" was not found in WSL.';
 end;
@@ -640,11 +643,26 @@ end;
 function WslPageNext(Sender: TWizardPage): Boolean;
 var
   Problem: String;
+  I: Integer;
 begin
   Problem := ProblemWithConfig;
   Result := Problem = '';
   if not Result then
+  begin
     Complain(Problem);
+    Exit;
+  end;
+  // WSL 1 shares the network of Windows and has trouble with the database file locking of n8n.
+  I := CbxWslDistro.ItemIndex;
+  if (I >= 0) and (I < GWslCount) and (GWslVersion[I] = '1') then
+  begin
+    if WizardSilent then
+      FileLog(Cfg.WslDistro + ' runs on WSL 1, which is slow and often fails with n8n. Going on, as asked.')
+    else
+      Result := AskYesNo(Cfg.WslDistro + ' runs on WSL 1, which is slow and often fails with n8n (WSL 1 has trouble with the file locking of its database).' + #13#10#13#10 +
+        'WSL 2 is much better. You can convert it with the command  wsl --set-version ' + Cfg.WslDistro + ' 2' + #13#10#13#10 +
+        'Continue with WSL 1 anyway?', False);
+  end;
 end;
 
 procedure OptionsPageActivate(Sender: TWizardPage);
