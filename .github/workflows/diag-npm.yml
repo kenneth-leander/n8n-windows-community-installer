@@ -1,101 +1,102 @@
 name: Diagnose npm on Windows (temporary)
 
 # Temporary. Finds out why "npm install n8n@2" does not finish on GitHub's Windows computers when the
-# installer starts it. This file is deleted again as soon as the cause is known.
+# installer starts it (it finishes in 4 to 7 minutes when started by hand). This file and
+# .github/diag are deleted again as soon as the cause is known.
 
 on:
   push:
     branches: [gui-installer]
     paths:
       - '.github/workflows/diag-npm.yml'
+      - '.github/diag/**'
   workflow_dispatch:
 
 permissions:
   contents: read
 
+env:
+  INNO_VERSION: '6.7.3'
+  INNO_SHA256: 'f780898e402ff80612cc8d9fcb8c6e02932bd1cb4c900ffdaa31f9341cfb49f4'
+
 jobs:
-  npm:
-    name: npm install n8n@2 (${{ matrix.mode }})
+  bench:
+    name: How Setup reads program output (${{ matrix.group }})
     runs-on: windows-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        mode: [plain, stdin-open, foreground]
+        group: [small, n8n]
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
 
-      - name: Install n8n with npm and say what is going on every minute
+      - name: Build the small test program with Inno Setup
+        shell: pwsh
+        run: |
+          $package = Join-Path $env:RUNNER_TEMP 'innosetup.zip'
+          Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/Tools.InnoSetup/$env:INNO_VERSION" -OutFile $package
+          if ((Get-FileHash $package -Algorithm SHA256).Hash.ToLower() -ne $env:INNO_SHA256) { throw 'wrong compiler' }
+          Expand-Archive -Path $package -DestinationPath (Join-Path $env:RUNNER_TEMP 'innosetup')
+          & (Join-Path $env:RUNNER_TEMP 'innosetup\tools\ISCC.exe') .github\diag\pipe-bench.iss
+          if ($LASTEXITCODE -ne 0) { throw 'ISCC failed' }
+
+      - name: Run the cases
         shell: pwsh
         env:
-          MODE: ${{ matrix.mode }}
+          GROUP: ${{ matrix.group }}
         run: |
-          $dir = Join-Path $env:RUNNER_TEMP 'npm-diag'
-          New-Item -ItemType Directory -Path $dir -Force | Out-Null
-          Set-Location $dir
-          Write-Host "node $(node --version), npm $(npm --version), mode $env:MODE"
-          Write-Host "registry $(npm config get registry), cache $(npm config get cache)"
-          $out = Join-Path $dir 'npm-out.txt'
-          $npmArgs = 'install n8n@2 --no-fund --no-audit --loglevel=http'
-          if ($env:MODE -eq 'foreground') { $npmArgs += ' --foreground-scripts' }
+          $exe = (Resolve-Path '.github\diag\out\pipe-bench.exe').Path
+          $burst = Join-Path $env:RUNNER_TEMP 'burst.js'
+          Set-Content -Path $burst -Value "for (let i = 0; i < 20000; i++) console.error('npm http fetch GET 200 https://registry.npmjs.org/package' + i + ' 12ms (cache miss)');"
+          $line = 'line %i abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz0123456789'
 
-          function Show-Activity([int]$rootId, [double]$elapsedSec) {
-            $all = @(Get-CimInstance Win32_Process)
-            $family = New-Object 'System.Collections.Generic.HashSet[int]'
-            [void]$family.Add($rootId)
-            do {
-              $grew = $false
-              foreach ($proc in $all) {
-                if ($family.Contains([int]$proc.ParentProcessId) -and $family.Add([int]$proc.ProcessId)) { $grew = $true }
+          function Run-Case([string]$name, [int]$work, [string]$cmd, [int]$limit) {
+            Write-Host ''
+            Write-Host "=== $name (work level $work): $cmd"
+            $log = Join-Path $env:TEMP "bench-$name.log"
+            Remove-Item $log -ErrorAction SilentlyContinue
+            $argText = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=`"$env:RUNNER_TEMP\setup-$name.log`" /CASE=$name /WORK=$work `"/CMD=$cmd`""
+            $clock = [Diagnostics.Stopwatch]::StartNew()
+            $p = Start-Process -FilePath $exe -ArgumentList $argText -PassThru
+            $next = 30
+            while (-not $p.WaitForExit(2000)) {
+              if ($clock.Elapsed.TotalSeconds -ge $next) {
+                $next += 30
+                Write-Host ("  [{0:n0} s] still running. Test program log:" -f $clock.Elapsed.TotalSeconds)
+                Get-Content $log -Tail 3 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "    $_" }
+                Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^(cmd|node|conhost|ping)\.exe$' } | ForEach-Object {
+                  $cpu = ''; try { $cpu = '{0:n1}s' -f (Get-Process -Id $_.ProcessId -ErrorAction Stop).CPU } catch { }
+                  $text = "$($_.CommandLine)"; if ($text.Length -gt 120) { $text = $text.Substring(0, 120) + '...' }
+                  Write-Host ('    {0,6} (from {1,6}) cpu {2,8} {3}' -f $_.ProcessId, $_.ParentProcessId, $cpu, $text)
+                }
               }
-            } while ($grew)
-            Write-Host ("[{0:n1} min] programs started by npm:" -f ($elapsedSec / 60))
-            foreach ($proc in $all) {
-              if ($proc.ProcessId -eq $rootId -or -not $family.Contains([int]$proc.ProcessId)) { continue }
-              $cpu = ''
-              try { $cpu = '{0:n1}s' -f (Get-Process -Id $proc.ProcessId -ErrorAction Stop).CPU } catch { }
-              $line = "$($proc.CommandLine)"
-              if ($line.Length -gt 170) { $line = $line.Substring(0, 170) + '...' }
-              Write-Host ('  {0,6} (from {1,6})  cpu {2,8}  {3}' -f $proc.ProcessId, $proc.ParentProcessId, $cpu, $line)
-            }
-            if (Test-Path $out) {
-              $size = (Get-Item $out).Length
-              Write-Host "  npm output so far: $size bytes. Last lines:"
-              Get-Content -Path $out -Tail 3 -ErrorAction SilentlyContinue | ForEach-Object {
-                $text = "$_"; if ($text.Length -gt 170) { $text = $text.Substring(0, 170) + '...' }; Write-Host "    $text"
+              if ($clock.Elapsed.TotalSeconds -ge $limit) {
+                Write-Host "::error::case $name did not finish within $limit seconds"
+                & taskkill.exe /PID $p.Id /T /F | Out-Null
+                break
               }
             }
+            Write-Host ("  case {0} ended after {1:n1} s (exit code {2})" -f $name, $clock.Elapsed.TotalSeconds, $p.ExitCode)
+            Get-Content $log -ErrorAction SilentlyContinue | Where-Object { $_ -notmatch '^  ' } | Select-Object -Last 6 | ForEach-Object { Write-Host "    $_" }
           }
 
-          $clock = [Diagnostics.Stopwatch]::StartNew()
-          $cmdLine = "/c npm $npmArgs > `"$out`" 2>&1"
-          if ($env:MODE -eq 'stdin-open') {
-            # Standard input is a pipe that nobody ever writes to or closes.
-            $psi = New-Object Diagnostics.ProcessStartInfo
-            $psi.FileName = $env:ComSpec
-            $psi.Arguments = $cmdLine
-            $psi.UseShellExecute = $false
-            $psi.RedirectStandardInput = $true
-            $psi.CreateNoWindow = $true
-            $p = [Diagnostics.Process]::Start($psi)
+          if ($env:GROUP -eq 'small') {
+            Run-Case 'c1-nothing' 0 "for /L %i in (1,1,20000) do @echo $line" 180
+            Run-Case 'c2-logfile' 2 "for /L %i in (1,1,20000) do @echo $line" 180
+            Run-Case 'c3-label' 3 "for /L %i in (1,1,20000) do @echo $line" 180
+            Run-Case 'c4-marquee' 4 "for /L %i in (1,1,20000) do @echo $line" 180
+            Run-Case 'c5-quiet-then-burst' 4 "ping -n 21 127.0.0.1 >nul & for /L %i in (1,1,20000) do @echo $line" 180
+            Run-Case 'c6-node-stderr' 4 "node $burst" 180
+            Run-Case 'c7-npm-small' 4 "npm install --prefix %TEMP%\bench-npm1 left-pad --no-fund --no-audit --loglevel=http" 240
+            Run-Case 'c8-npm-medium' 4 "npm install --prefix %TEMP%\bench-npm2 express --no-fund --no-audit --loglevel=http" 300
+            Run-Case 'c9-to-a-file' 4 "npm install --prefix %TEMP%\bench-npm3 express --no-fund --no-audit --loglevel=http > %TEMP%\npm3.txt 2>&1" 300
           }
           else {
-            $p = Start-Process -FilePath $env:ComSpec -ArgumentList $cmdLine -PassThru -WindowStyle Hidden
+            New-Item -ItemType Directory -Path (Join-Path $env:TEMP 'bench-n8n') -Force | Out-Null
+            Run-Case 'n8n-through-setup' 4 "npm install --prefix %TEMP%\bench-n8n n8n@2 --no-fund --no-audit --loglevel=http" 1200
           }
-          $next = 60
-          $limit = 20 * 60
-          while (-not $p.WaitForExit(5000)) {
-            if ($clock.Elapsed.TotalSeconds -ge $next) { Show-Activity $p.Id $clock.Elapsed.TotalSeconds; $next += 60 }
-            if ($clock.Elapsed.TotalSeconds -ge $limit) {
-              Write-Host "::error::npm did not finish within 20 minutes"
-              Show-Activity $p.Id $clock.Elapsed.TotalSeconds
-              & taskkill.exe /PID $p.Id /T /F | Out-Null
-              break
-            }
-          }
-          Write-Host ("npm ended after {0:n0} seconds, exit code {1}" -f $clock.Elapsed.TotalSeconds, $p.ExitCode)
-          Write-Host '--- the last 40 lines npm printed ---'
-          Get-Content -Path $out -Tail 40 -ErrorAction SilentlyContinue
-          if ($p.ExitCode -ne 0) { exit 1 }
