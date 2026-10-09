@@ -165,7 +165,7 @@ procedure CollectConfig;
 begin
   Cfg.Method := ChosenMethod;
   Cfg.Port := StrToIntDef(Trim(EdPort.Text), 0);
-  Cfg.Lan := CbLan.Checked;
+  Cfg.Lan := CbLan.Checked and (Cfg.Method <> MethodWsl);
   Cfg.DockerName := Trim(EdDockerName.Text);
   Cfg.DockerVolume := Trim(EdDockerVolume.Text);
   Cfg.DockerChannel := CbxDockerVersion.ItemIndex;
@@ -434,6 +434,12 @@ end;
 // Page: network
 // ---------------------------------------------------------------------------
 
+const
+  LanNoteText = 'Leave this off if you are the only one who uses n8n on this computer. ' +
+    'When it is on, anyone on your network can reach n8n, and Windows may ask you to allow it through the firewall.';
+  LanNoteWsl = 'Not available for Linux inside Windows (WSL2): Windows passes n8n on to this computer only, ' +
+    'so other devices cannot reach it.';
+
 procedure BuildNetPage;
 var
   L: TNewStaticText;
@@ -447,10 +453,7 @@ begin
   LblPortStatus := NewText(PageNet, '', 0, Below(EdPort, 6), False);
 
   CbLan := NewCheck(PageNet, 'Let other devices on my network open n8n', Below(LblPortStatus, 28), False);
-  LblLanNote := NewText(PageNet,
-    'Leave this off if you are the only one who uses n8n on this computer. ' +
-    'When it is on, anyone on your network can reach n8n, and Windows may ask you to allow it through the firewall.',
-    22, Below(CbLan, 2), False);
+  LblLanNote := NewText(PageNet, LanNoteText, 22, Below(CbLan, 2), False);
 end;
 
 // ---------------------------------------------------------------------------
@@ -588,6 +591,18 @@ end;
 procedure NetPageActivate(Sender: TWizardPage);
 begin
   RefreshPortStatus;
+  if ChosenMethod = MethodWsl then
+  begin
+    // Windows passes a WSL2 program on to this computer only, so there is nothing for the box to switch.
+    CbLan.Checked := False;
+    CbLan.Enabled := False;
+    SetText(LblLanNote, LanNoteWsl);
+  end
+  else
+  begin
+    CbLan.Enabled := True;
+    SetText(LblLanNote, LanNoteText);
+  end;
 end;
 
 function NetPageNext(Sender: TWizardPage): Boolean;
@@ -601,6 +616,8 @@ begin
     Complain(Problem);
     Exit;
   end;
+  if WizardSilent and CbLan.Checked and (Cfg.Method = MethodWsl) then
+    FileLog('/LAN is ignored for Linux inside Windows (WSL2): Windows passes n8n on to this computer only.');
   if PortInUse(Cfg.Port) or PortInUse(Cfg.Port + 1) then
     if WizardSilent then
       FileLog('Port ' + IntToStr(Cfg.Port) + ' (or the next one) is in use. Going on, as asked.')
