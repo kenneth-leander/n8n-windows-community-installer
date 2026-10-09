@@ -72,6 +72,7 @@ function Test-Case {
         [string[]]$UninstallArgs = @(),
         [string[]]$UninstallIn = @(),
         [string[]]$UninstallNotIn = @(),
+        [switch]$StopShortcut,
         [string]$DryRunSwitch = '/DRYRUN'
     )
     Write-Host ''
@@ -91,6 +92,11 @@ function Test-Case {
 
     Check (Test-Path "$dir\unins000.exe") 'the uninstaller is there'
     Check ($null -ne (Get-UninstallEntry $dir)) 'Apps & features lists it'
+    $menu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\$Name"
+    foreach ($item in 'Start n8n.lnk', 'Open n8n in my web browser.url', 'Read me.lnk', 'Uninstall n8n.lnk') {
+        Check (Test-Path (Join-Path $menu $item)) "the Start menu has: $item"
+    }
+    Check ((Test-Path (Join-Path $menu 'Stop n8n.lnk')) -eq [bool]$StopShortcut) "the Start menu has a Stop n8n entry: $([bool]$StopShortcut)"
     $uninstallArgs = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/DRYRUN') + $UninstallArgs
     $u = Invoke-Logged "$dir\unins000.exe" $uninstallArgs 'uninstall' { $null -eq (Get-UninstallEntry $dir) }
     Check ($u.ExitCode -eq 0) "the uninstaller ended with exit code 0 (it was $($u.ExitCode))"
@@ -98,6 +104,7 @@ function Test-Case {
     foreach ($pattern in $UninstallNotIn) { Check ($u.Log -notmatch $pattern) "the uninstall log does not say: $pattern" }
     Check ($null -eq (Get-UninstallEntry $dir)) 'Apps & features no longer lists it'
     Check (-not (Test-Path "$dir\n8n-installer.ini")) 'the install record is gone'
+    Check (-not (Test-Path $menu)) 'the Start menu entries are gone'
     if ($script:problems.Count -gt $problemsBefore -and $u.Log) {
         Write-Host '--- uninstall log ---'
         Write-Host $u.Log
@@ -115,7 +122,7 @@ Test-Case -Name 'global-old-node' -InstallArgs @('/METHOD=global', '/FAKENODE=18
     -ExpectInLog @('cannot be used')
 
 # --- Docker -----------------------------------------------------------------
-Test-Case -Name 'docker' -InstallArgs @('/METHOD=docker', '/FAKEDOCKER=ready') `
+Test-Case -Name 'docker' -InstallArgs @('/METHOD=docker', '/FAKEDOCKER=ready') -StopShortcut `
     -ExpectInLog @('docker pull docker\.n8n\.io/n8nio/n8n:\d+\.\d+\.\d+',
         'docker volume create n8n_data',
         'docker run -d --name n8n --restart unless-stopped -p 127\.0\.0\.1:5678:5678 ',
@@ -123,11 +130,11 @@ Test-Case -Name 'docker' -InstallArgs @('/METHOD=docker', '/FAKEDOCKER=ready') `
     -ExpectNotInLog @('N8N_SECURE_COOKIE') `
     -UninstallIn @('docker rm -f n8n', 'docker rmi docker\.n8n\.io/n8nio/n8n:') `
     -UninstallNotIn @('docker volume rm')
-Test-Case -Name 'docker-own-names' `
+Test-Case -Name 'docker-own-names' -StopShortcut `
     -InstallArgs @('/METHOD=docker', '/FAKEDOCKER=ready', '/PORT=5690', '/DOCKERNAME=my-n8n', '/DOCKERVOLUME=my_data', '/TZ=Europe/Oslo') `
     -ExpectInLog @('--name my-n8n ', '-p 127\.0\.0\.1:5690:5678 ', 'GENERIC_TIMEZONE=Europe/Oslo', 'WEBHOOK_URL=http://localhost:5690/', '-v my_data:/home/node/\.n8n ') `
     -UninstallArgs @('/DELETEDATA=1') -UninstallIn @('docker rm -f my-n8n', 'docker volume rm my_data')
-Test-Case -Name 'docker-network' -InstallArgs @('/METHOD=docker', '/FAKEDOCKER=ready', '/LAN=1') `
+Test-Case -Name 'docker-network' -InstallArgs @('/METHOD=docker', '/FAKEDOCKER=ready', '/LAN=1') -StopShortcut `
     -ExpectInLog @('-p 5678:5678 ', 'N8N_SECURE_COOKIE=false') -ExpectNotInLog @('127\.0\.0\.1:5678:5678')
 Test-Case -Name 'docker-missing' -InstallArgs @('/METHOD=docker', '/FAKEDOCKER=missing') -ExpectExit 1 -ExpectInLog @('cannot be used')
 Test-Case -Name 'docker-stopped' -InstallArgs @('/METHOD=docker', '/FAKEDOCKER=stopped') -ExpectExit 1 -ExpectInLog @('not running')
