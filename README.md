@@ -1,4 +1,4 @@
-# n8n Installer for Windows
+# n8n Windows Community Installer
 
 **Install n8n on Windows 10 or Windows 11 in a few clicks.** A free, open-source setup program for running n8n, the workflow automation tool, on your own PC. No command line, no administrator rights, and a normal uninstaller.
 
