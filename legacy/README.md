@@ -7,7 +7,7 @@
 An unofficial, community-created installation wizard for [n8n](https://n8n.io) on Windows systems.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.2-blue.svg)](https://github.com/web3Leander/n8n-windows-community-installer)
+[![Version](https://img.shields.io/badge/version-0.2-blue.svg)](https://github.com/kenneth-leander/n8n-windows-community-installer)
 
 > **IMPORTANT DISCLAIMER**
 >
@@ -604,7 +604,7 @@ This project is licensed under the MIT License - see the [LICENSE](../LICENSE) f
 
 ## Author
 
-Created by [web3Leander](https://github.com/web3Leander)
+Created by [Kenneth Leander Meyer](https://github.com/kenneth-leander)
 
 ## Credits
 
@@ -613,8 +613,8 @@ Created by [web3Leander](https://github.com/web3Leander)
 
 ## Links
 
-- [Report Issues](https://github.com/web3Leander/n8n-windows-community-installer/issues)
-- [Request Features](https://github.com/web3Leander/n8n-windows-community-installer/issues)
+- [Report Issues](https://github.com/kenneth-leander/n8n-windows-community-installer/issues)
+- [Request Features](https://github.com/kenneth-leander/n8n-windows-community-installer/issues)
 
 ---
 
