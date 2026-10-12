@@ -162,7 +162,7 @@ The installer is built with [Inno Setup](https://jrsoftware.org/isinfo.php). The
 ## License, author and credits
 
 - MIT License, see [LICENSE](LICENSE).
-- Created by [web3Leander](https://github.com/web3Leander).
+- Created by [Kenneth Leander Meyer](https://github.com/kenneth-leander).
 - **n8n** is developed by [n8n GmbH](https://n8n.io). This installer is a community contribution to make n8n easier to use on Windows.
 
 ---
