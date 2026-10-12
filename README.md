@@ -7,7 +7,6 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](CHANGELOG.md)
 ![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?logo=windows)
-![Free](https://img.shields.io/badge/price-free-brightgreen.svg)
 
 > This is an **unofficial** community project. It is not made by, endorsed by or connected to n8n GmbH. For n8n itself, see [n8n.io](https://n8n.io), the [n8n docs](https://docs.n8n.io) and the [n8n community forum](https://community.n8n.io). For problems with this installer, [open an issue here](https://github.com/kenneth-leander/n8n-windows-community-installer/issues).
 
