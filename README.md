@@ -4,7 +4,7 @@
 
 [![Download](https://img.shields.io/badge/Download-n8n--Installer.exe-2ea44f?style=for-the-badge&logo=windows)](https://github.com/kenneth-leander/n8n-windows-community-installer/raw/main/n8n-Installer.exe)
 
-> **Windows Defender warning (October 2026):** Defender currently flags `n8n-Installer.exe` as "Trojan:Win32/Ulthar.A!ml". This is a false alarm from Defender's automatic guesswork (the "!ml" part), not a virus: the file is built from the source in this repository by GitHub Actions and has not changed since 9 October 2026. We are looking into it and reporting it to Microsoft, and will remove this note once it is fixed. To check that your download is genuine, see [Want to make sure the download is genuine?](#install-n8n-on-windows-in-4-steps) below.
+> **Windows Defender warning:** In October 2026 Defender briefly flagged `n8n-Installer.exe` as "Trojan:Win32/Ulthar.A!ml". This was a false alarm, and Microsoft has since withdrawn it. If Defender still warns you, update it (Windows Security, then Virus & threat protection, then Protection updates) and download again. To check that your download is genuine, see [Want to make sure the download is genuine?](#install-n8n-on-windows-in-4-steps) below.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](CHANGELOG.md)
